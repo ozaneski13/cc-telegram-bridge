@@ -96,12 +96,12 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 | `/use 2` or `/use a1b2` | Switches the target for plain messages |
 | `/usage` | Your plan limits: 5-hour and weekly windows with reset times |
 | `/status` | Current defaults, target chat, and usage in one message |
-| `/model opus\|sonnet\|fable\|haiku` | Sets the model (append `[1m]` for 1M context) |
-| `/effort low\|medium\|high\|xhigh` | Sets the reasoning effort |
+| `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Sets the model (append `[1m]` for 1M context) |
+| `/effort low\|medium\|high\|xhigh [#chat\|N\|global]` | Sets the reasoning effort |
 | `/fast on\|off` | Toggles fast mode |
 | `/help` | Command list |
 
-**Scope rules.** `/model` and `/effort` change the **target chat** (pick it with `/sessions` + `/use N`); add `global` — e.g. `/model fable global` — to change the default for **new** chats instead. `/fast` is global only.
+**Scope rules.** `/model` and `/effort` change one chat. Name it inline — `/model fable #a1b2c3d4`, `/model fable 6` (the number from `/sessions`), or by title — or omit it to use the current target chat. Add `global` — `/model fable global` — to change the default for **new** chats instead. `/fast` is global only.
 
 A per-chat change is stored in that chat's saved state, so it applies the next time the chat is opened. The desktop app rewrites its own state for the chat you are actively using, so a chat that is open right now will overwrite the change — close it first, or use `global`. Switching the model of the chat you are typing in is not possible remotely; use the model picker in the app.
 

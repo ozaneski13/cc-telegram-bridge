@@ -93,12 +93,12 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 | `/use 2` veya `/use a1b2` | Düz mesajların hedefini değiştirir |
 | `/usage` | Plan limitlerin: 5 saatlik ve haftalık pencereler + sıfırlanma saatleri |
 | `/status` | Mevcut varsayılanlar + hedef chat + kullanım, tek mesajda |
-| `/model opus\|sonnet\|fable\|haiku` | Modeli değiştirir (1M context için sonuna `[1m]`) |
-| `/effort low\|medium\|high\|xhigh` | Düşünme eforunu değiştirir |
+| `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Modeli değiştirir (1M context için sonuna `[1m]`) |
+| `/effort low\|medium\|high\|xhigh [#chat\|N\|global]` | Düşünme eforunu değiştirir |
 | `/fast on\|off` | Fast mode açar/kapatır |
 | `/help` | Komut listesi |
 
-**Kapsam kuralı.** `/model` ve `/effort` **hedef chat'i** değiştirir (`/sessions` + `/use N` ile seç); sonuna `global` eklersen — `/model fable global` — bunun yerine **yeni** chat'lerin varsayılanı değişir. `/fast` yalnızca globaldir.
+**Kapsam kuralı.** `/model` ve `/effort` tek bir chat'i değiştirir. Chat'i satır içinde belirt — `/model fable #a1b2c3d4`, `/model fable 6` (`/sessions`'daki numara) veya başlığıyla — ya da hiç yazma, aktif hedef chat kullanılır. Sonuna `global` eklersen — `/model fable global` — bunun yerine **yeni** chat'lerin varsayılanı değişir. `/fast` yalnızca globaldir.
 
 Chat bazlı değişiklik o chat'in kayıtlı durumuna yazılır, yani chat bir dahaki açılışında geçerli olur. Uygulama, aktif kullandığın chat'in durumunu her turda kendisi yeniden yazdığı için **şu an açık olan** bir chat değişikliği ezer — önce o chat'i kapat, ya da `global` kullan. Halihazırda içinde yazdığın chat'in modelini uzaktan değiştirmek mümkün değil; app'teki model seçiciyi kullan.
 

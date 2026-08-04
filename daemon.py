@@ -309,11 +309,34 @@ def status_text():
             f"target chat: {target}\n\n" + usage_text())
 
 
-def split_scope(arg):
+def parse_target_arg(arg):
     parts = arg.split()
-    if len(parts) > 1 and parts[-1].lower() in ("global", "default", "new", "all"):
-        return " ".join(parts[:-1]).strip(), True
-    return arg.strip(), False
+    value = parts[0].lower() if parts else ""
+    rest = " ".join(parts[1:]).strip()
+    if rest.lower() in ("global", "default", "new", "all"):
+        return value, True, None, None
+    if rest:
+        t = resolve_target(rest.lstrip("#"))
+        if not t:
+            return value, False, None, f"chat not found: {rest} — list them with /sessions"
+        return value, False, t, None
+    with LOCK:
+        last = STATE.get("last_session")
+    if last:
+        row = resolve_target(last[:8])
+        if row:
+            return value, False, row, None
+    return value, False, None, None
+
+
+def apply_to_chat(row, field, value, shown):
+    if not patch_session(row["cli"], field, value):
+        return "could not write that chat's saved state"
+    name = row["title"] or (Path(row["cwd"]).name if row["cwd"] else "?")
+    msg = f"{name} #{row['cli'][:8]} → {field} {shown}\nit opens with this next time"
+    if time.time() - row["ts"] < 120:
+        msg += "\n⚠️ that chat looks active right now — the app rewrites its own state each turn, so close it first (or use 'global')"
+    return msg
 
 
 def apply_default(field, value):
@@ -324,43 +347,39 @@ def apply_default(field, value):
     return None if write_settings(s) else "could not write settings"
 
 
+MODEL_USAGE = "usage: /model opus|sonnet|fable|haiku [#chatid | N | global]  (add [1m] for 1M context)"
+EFFORT_USAGE = "usage: /effort low|medium|high|xhigh [#chatid | N | global]"
+
+
 def set_model(arg):
-    raw, is_global = split_scope(arg)
-    key = raw.lower()
+    key, is_global, row, err = parse_target_arg(arg)
     base = key[:-4] if key.endswith("[1m]") else key
     if base not in MODEL_IDS:
-        return "usage: /model opus|sonnet|fable|haiku [global]  (add [1m] for 1M context)"
+        return MODEL_USAGE
+    if err:
+        return err
     if is_global:
         cur = str((read_settings() or {}).get("model") or "")
         val = base + ("[1m]" if key.endswith("[1m]") or cur.endswith("[1m]") else "")
-        err = apply_default("model", val)
-        return err or f"default model → {val} (applies to new chats)"
-    with LOCK:
-        last = STATE.get("last_session")
-    if not last:
-        return "no target chat — pick one with /sessions and /use N (or add 'global' to change the default)"
-    if not patch_session(last, "model", MODEL_IDS[base]):
-        return "could not write that chat's settings"
-    return (f"#{last[:8]} model → {base}\nopens with it next time. If that chat is open right now, close it first — "
-            "the app rewrites its own state on every turn. Use 'global' to change new chats instead.")
+        e = apply_default("model", val)
+        return e or f"default model → {val} (applies to new chats)"
+    if not row:
+        return "no target chat — add #chatid, or pick one with /sessions and /use N (or add 'global')"
+    return apply_to_chat(row, "model", MODEL_IDS[base], base)
 
 
 def set_effort(arg):
-    raw, is_global = split_scope(arg)
-    lvl = raw.lower()
+    lvl, is_global, row, err = parse_target_arg(arg)
     if lvl not in EFFORTS:
-        return "usage: /effort low|medium|high|xhigh [global]"
+        return EFFORT_USAGE
+    if err:
+        return err
     if is_global:
-        err = apply_default("effortLevel", lvl)
-        return err or f"default effort → {lvl} (applies to new chats)"
-    with LOCK:
-        last = STATE.get("last_session")
-    if not last:
-        return "no target chat — pick one with /sessions and /use N (or add 'global')"
-    if not patch_session(last, "effort", lvl):
-        return "could not write that chat's settings"
-    return (f"#{last[:8]} effort → {lvl}\nopens with it next time. If that chat is open right now, close it first — "
-            "the app rewrites its own state on every turn.")
+        e = apply_default("effortLevel", lvl)
+        return e or f"default effort → {lvl} (applies to new chats)"
+    if not row:
+        return "no target chat — add #chatid, or pick one with /sessions and /use N (or add 'global')"
+    return apply_to_chat(row, "effort", lvl, lvl)
 
 
 def set_fast(arg):
@@ -387,8 +406,8 @@ HELP_TEXT = ("Commands\n"
              "/status — defaults + target chat + usage\n"
              "/sessions — recent chats (model/effort shown)\n"
              "/use N — switch target chat\n"
-             "/model opus|sonnet|fable|haiku — target chat (add 'global' for new chats)\n"
-             "/effort low|medium|high|xhigh — target chat (add 'global')\n"
+             "/model fable #chatid — that chat (or N, or 'global' for new chats)\n"
+             "/effort high #chatid — same targeting\n"
              "/fast on|off\n\n"
              "Reply to a notification to answer that chat; a plain message goes to the target chat.")
 
@@ -884,10 +903,10 @@ def handle_update(u):
         reply_chat(status_text())
         return
     if cmd == "/model":
-        reply_chat(set_model(arg) if arg else "usage: /model opus|sonnet|fable|haiku")
+        reply_chat(set_model(arg) if arg else MODEL_USAGE)
         return
     if cmd == "/effort":
-        reply_chat(set_effort(arg) if arg else "usage: /effort low|medium|high|xhigh")
+        reply_chat(set_effort(arg) if arg else EFFORT_USAGE)
         return
     if cmd == "/fast":
         reply_chat(set_fast(arg))
