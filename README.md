@@ -162,15 +162,34 @@ Restart the daemon after changing `.env`.
 
 ---
 
-## Security & privacy
+## Is this safe to run?
 
-- The daemon listens on **127.0.0.1 only**; hook calls are authenticated with a shared secret.
-- `/usage` reads the OAuth token Claude Code already stores locally and sends it only to Anthropic's own API.
-- `/model` and `/effort` write only the model/effort field of the named chat's saved state. With `global` (and `/fast` always) they instead edit only `model`, `effortLevel` or `fastMode` in `~/.claude/settings.json`, keeping a `.bridge-bak` copy and validating the file before replacing it. Any other value is rejected.
-- Only your Telegram id is accepted — there is nothing a stranger can do by finding your bot.
-- Your bot token lives only in your local `.env` (gitignored). No secrets are stored anywhere else.
-- **Summaries of Claude's answers travel through Telegram's servers.** For sensitive projects, add the folder name to `IGNORE_CWD_SUBSTRINGS`.
-- No binaries ship in this repo; you build both executables locally from readable, stdlib-only Python.
+This tool sits between your code assistant and a chat app, so it deserves scrutiny. Everything below is verifiable from the source in about a minute — please check rather than take my word for it.
+
+**Verify it yourself:**
+
+```bash
+grep -hE "^import |^from " daemon.py plugin/hooks/notify_event.py | sort -u   # dependencies
+grep -ohE "https?://[a-zA-Z0-9./_-]+" daemon.py plugin/hooks/notify_event.py  # every outbound address
+grep -nE "subprocess|os.system|eval\(|exec\(|shell=True" daemon.py plugin/hooks/notify_event.py
+grep -nE "open\(.*['\"]w|write_text|os.replace" daemon.py                     # every file it writes
+```
+
+What those commands show, and what it means:
+
+- **No dependencies.** Python standard library only — nothing is pulled from PyPI at runtime, so there is no supply chain to trust. About 1,300 lines total, small enough to read end to end.
+- **No binaries in this repo.** You compile the two executables yourself from the sources you just read.
+- **Three network destinations, ever:** `127.0.0.1` (hooks → daemon), `api.telegram.org` (your bot), and `api.anthropic.com/api/oauth/usage` (only for `/usage`). No telemetry, no analytics, no third-party endpoint.
+- **It never executes anything you send.** The only process it ever launches is its own daemon executable — no shell, no `eval`, no command built from a message. Telegram text is carried as text.
+- **It writes to a fixed set of paths:** its own folder (state, queue, logs), the `model`/`effort` field of a named chat's saved state, and — only for `global`/`/fast` — the `model`, `effortLevel` and `fastMode` keys of `~/.claude/settings.json`, backed up to `.bridge-bak` and validated before replacing. Any other value is rejected.
+- **Only your numeric Telegram id is accepted;** everything else is dropped silently, so a stranger who finds your bot gets nothing. The local HTTP endpoint listens on loopback only and requires a shared secret.
+- **Your bot token never leaves `.env`,** which is gitignored. The daemon holds no other credential; `/usage` reads the OAuth token Claude Code already stored on your machine and sends it only to Anthropic.
+
+**What it genuinely exposes — decide if you accept it:**
+
+- Summaries of Claude's answers are sent to Telegram, so they pass through Telegram's servers and are stored in your chat history. Telegram bot messages are not end-to-end encrypted. Mute sensitive projects with `IGNORE_CWD_SUBSTRINGS`.
+- A reply you send from Telegram becomes a user message in a session running with your permissions. If you use Claude Code in a permissive mode, that message can lead to file changes — so anyone with access to your unlocked Telegram account has that reach too. The bot token itself is equally sensitive: whoever holds it can read what you send to the bot.
+- The daemon trusts local processes that hold the shared secret. Anything already running as your user could read `.env` anyway, so this is not a new boundary — but it is not a defence against a compromised machine either.
 
 ## Limitations
 

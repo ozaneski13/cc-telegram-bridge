@@ -159,14 +159,34 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 
 ---
 
-## Güvenlik ve gizlilik
+## Çalıştırmak güvenli mi?
 
-- Daemon sadece **127.0.0.1** dinler; hook çağrıları ortak sırla doğrulanır.
-- Sadece senin Telegram id'in kabul edilir — botunu bulan bir yabancının yapabileceği hiçbir şey yok.
-- Bot token'ın yalnızca lokal `.env`'de yaşar (gitignore'da). Başka hiçbir yerde saklanmaz.
-- `/usage` Claude Code'un makinende zaten sakladığı OAuth token'ını okur ve yalnızca Anthropic'in kendi API'sine gönderir. `/model` ve `/effort` yalnızca hedeflenen sohbetin model/effort alanını yazar; `global` ile (ve `/fast` her zaman) `~/.claude/settings.json` içindeki sadece `model`/`effortLevel`/`fastMode` anahtarlarını düzenler — `.bridge-bak` yedeği alınır, dosya yazımdan önce doğrulanır, geçersiz değer reddedilir.
-- **Claude cevaplarının özetleri Telegram sunucularından geçer.** Hassas projeler için klasör adını `IGNORE_CWD_SUBSTRINGS`'e ekle.
-- Repoda binary yok; iki exe'yi de okunabilir, bağımlılıksız Python kaynağından kendin derliyorsun.
+Bu araç kod asistanınla bir sohbet uygulaması arasında duruyor, dolayısıyla sorgulanmayı hak ediyor. Aşağıdakilerin hepsi kaynak koddan bir dakikada doğrulanabilir — bana güvenmek yerine kontrol et.
+
+**Kendin doğrula:**
+
+```bash
+grep -hE "^import |^from " daemon.py plugin/hooks/notify_event.py | sort -u   # bagimliliklar
+grep -ohE "https?://[a-zA-Z0-9./_-]+" daemon.py plugin/hooks/notify_event.py  # disari giden tum adresler
+grep -nE "subprocess|os.system|eval\(|exec\(|shell=True" daemon.py plugin/hooks/notify_event.py
+grep -nE "open\(.*['\"]w|write_text|os.replace" daemon.py                     # yazdigi tum dosyalar
+```
+
+Bu komutların gösterdiği ve anlamı:
+
+- **Sıfır bağımlılık.** Yalnızca Python standart kütüphanesi — çalışma anında PyPI'dan hiçbir şey çekilmiyor, yani güvenmen gereken bir tedarik zinciri yok. Toplam ~1.300 satır; baştan sona okunabilecek kadar küçük.
+- **Repoda binary yok.** İki exe'yi de az önce okuduğun kaynaktan kendin derliyorsun.
+- **Toplam üç dış adres:** `127.0.0.1` (hook → daemon), `api.telegram.org` (kendi botun) ve `api.anthropic.com/api/oauth/usage` (yalnızca `/usage` için). Telemetri, analitik, üçüncü taraf uç noktası yok.
+- **Gönderdiğin hiçbir şeyi çalıştırmıyor.** Başlattığı tek süreç kendi daemon exe'si — shell yok, `eval` yok, mesajdan komut üretimi yok. Telegram metni metin olarak taşınıyor.
+- **Sabit bir dosya kümesine yazıyor:** kendi klasörü (durum, kuyruk, log), hedeflenen sohbetin `model`/`effort` alanı ve — yalnızca `global`/`/fast` ile — `~/.claude/settings.json` içindeki `model`, `effortLevel`, `fastMode` anahtarları (`.bridge-bak` yedeği alınarak ve dosya doğrulanarak). Geçersiz değer reddediliyor.
+- **Sadece senin numeric Telegram id'in kabul ediliyor;** gerisi sessizce düşüyor, yani botunu bulan yabancının eline hiçbir şey geçmiyor. Lokal HTTP ucu yalnızca loopback dinliyor ve ortak sır istiyor.
+- **Bot token'ın `.env`'den hiç çıkmıyor** (gitignore'da). Daemon başka bir kimlik bilgisi tutmuyor; `/usage`, Claude Code'un makinende zaten sakladığı OAuth token'ını okuyup yalnızca Anthropic'e gönderiyor.
+
+**Gerçekten neyi açığa çıkarıyor — kabul edip etmediğine sen karar ver:**
+
+- Claude cevaplarının özetleri Telegram'a gidiyor; yani Telegram sunucularından geçiyor ve sohbet geçmişinde saklanıyor. Telegram bot mesajları uçtan uca şifreli değildir. Hassas projeleri `IGNORE_CWD_SUBSTRINGS` ile sustur.
+- Telegram'dan yazdığın cevap, senin izinlerinle çalışan bir session'a kullanıcı mesajı olarak düşer. Claude Code'u izin sormayan bir modda kullanıyorsan bu mesaj dosya değişikliğine yol açabilir — dolayısıyla kilidi açık Telegram hesabına erişen biri de bu erişime sahiptir. Bot token'ı da aynı ölçüde hassastır: elinde tutan, bota yazdıklarını okuyabilir.
+- Daemon, ortak sırrı bilen yerel süreçlere güvenir. Zaten senin kullanıcınla çalışan herhangi bir şey `.env`'i okuyabilirdi, yani bu yeni bir sınır değil — ama ele geçirilmiş bir makineye karşı da bir savunma değil.
 
 ## Sınırlar
 
