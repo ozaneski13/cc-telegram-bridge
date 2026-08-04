@@ -198,6 +198,10 @@ What those commands show, and what it means:
 - Reply injection needs Claude Code Desktop. Notifications alone work with anything that runs Claude Code hooks.
 - Windows-only as shipped (PowerShell scripts, Startup shortcut); the daemon itself is portable Python.
 
+## Security
+
+Found something? See [SECURITY.md](SECURITY.md) — sensitive reports go through GitHub's private vulnerability reporting.
+
 ## License
 
 [MIT](LICENSE) — © 2026 Ozan Eşki.

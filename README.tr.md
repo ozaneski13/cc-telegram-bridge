@@ -195,6 +195,10 @@ Bu komutların gösterdiği ve anlamı:
 - Cevap enjeksiyonu Claude Code Desktop gerektirir; yalnız-bildirim tarafı hook çalıştıran her Claude Code'da işler.
 - Şu haliyle Windows-only (PowerShell script'leri, Startup kısayolu); daemon'ın kendisi taşınabilir Python.
 
+## Güvenlik bildirimi
+
+Bir açık bulursan: [SECURITY.md](SECURITY.md) — hassas bildirimler GitHub'ın özel güvenlik bildirim kanalından iletilir.
+
 ## Lisans
 
 [MIT](LICENSE) — © 2026 Ozan Eşki.
