@@ -40,6 +40,26 @@ LOCK = threading.Lock()
 PENDING = {}
 LAST_SENT = {}
 GLOBAL_SENDS = []
+CCD_SESSIONS_DIR = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"
+CCD_ID_CACHE = {}
+
+
+def resolve_ccd_id(cli_sid):
+    if cli_sid in CCD_ID_CACHE:
+        return CCD_ID_CACHE[cli_sid]
+    try:
+        for p in CCD_SESSIONS_DIR.rglob("local_*.json"):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if d.get("cliSessionId") == cli_sid:
+                ccd = d.get("sessionId") or p.stem
+                CCD_ID_CACHE[cli_sid] = ccd
+                return ccd
+    except Exception:
+        pass
+    return None
 
 
 def log(msg):
@@ -289,8 +309,9 @@ def queue_inbox(session_id, cwd, text):
         STATE["inbox_seq"] = STATE.get("inbox_seq", 0) + 1
         seq = STATE["inbox_seq"]
         save_state()
+    deliver_id = resolve_ccd_id(session_id) or session_id
     with open(INBOX_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"id": seq, "ts": time.time(), "session_id": session_id, "cwd": cwd, "text": text}, ensure_ascii=False) + "\n")
+        f.write(json.dumps({"id": seq, "ts": time.time(), "session_id": deliver_id, "cwd": cwd, "text": text}, ensure_ascii=False) + "\n")
     proj = Path(cwd).name if cwd else "?"
     conf = f"→ {proj} #{session_id[:8]}"
     if lag > 0:
