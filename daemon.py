@@ -37,6 +37,8 @@ SECRET = ENV.get("BRIDGE_SECRET", "")
 PORT = int(ENV.get("PORT", "8765") or "8765")
 HOLD_SECONDS = int(ENV.get("HOLD_SECONDS", "600") or "600")
 NOTIFY_GRACE = int(ENV.get("NOTIFY_GRACE_SECONDS", "180") or "180")
+ASK_WAIT = int(ENV.get("ASK_WAIT_SECONDS", "300") or "300")
+ASK_MODE = (ENV.get("ASK_ANSWER_MODE", "input") or "input").strip().lower()
 IGNORE_CWD = [s.strip().lower() for s in ENV.get("IGNORE_CWD_SUBSTRINGS", "cc-telegram-bridge").split(",") if s.strip()]
 
 LOCK = threading.Lock()
@@ -46,6 +48,8 @@ GLOBAL_SENDS = []
 HOLDS = {}
 HOT_PENDING = {}
 SESS_STATE = {}
+ASKS = {}
+ASK_SEQ = [0]
 CCD_SESSIONS_DIR = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"
 CCD_ID_CACHE = {}
 
@@ -181,6 +185,170 @@ def format_questions(tool_input):
     return "\n".join(parts) or "(question unreadable)"
 
 
+def ask_keyboard(cid, qidx, q, selected):
+    rows = []
+    for i, opt in enumerate(q.get("options") or []):
+        mark = "✅ " if i in selected else ""
+        rows.append([{"text": (mark + str(opt.get("label", "?")))[:60], "callback_data": f"{cid}|{qidx}|{i}"}])
+    if q.get("multiSelect"):
+        rows.append([{"text": "✔️ Done", "callback_data": f"{cid}|{qidx}|d"}])
+    rows.append([{"text": "✍️ Type an answer", "callback_data": f"{cid}|{qidx}|t"}])
+    return {"inline_keyboard": rows}
+
+
+def ask_text(a, qidx):
+    q = a["questions"][qidx]
+    head = f"[{a['label']}] ❓ {qidx + 1}/{len(a['questions'])}\n{q.get('question', '?')}"
+    body = "\n".join(f"• {o.get('label', '?')}: {(o.get('description') or '')[:90]}" for o in (q.get("options") or []))
+    return (head + ("\n" + body if body else ""))[:3900]
+
+
+def ask_send(cid):
+    a = ASKS.get(cid)
+    if not a or not STATE.get("chat_id"):
+        return
+    qidx = a["idx"]
+    try:
+        r = telegram("sendMessage", {"chat_id": STATE["chat_id"], "text": ask_text(a, qidx),
+                                     "reply_markup": ask_keyboard(cid, qidx, a["questions"][qidx], a["selected"])})
+        if r.get("ok"):
+            a["msg_id"] = r["result"]["message_id"]
+    except Exception as e:
+        log(f"ask_send failed: {e}")
+
+
+def ask_close(cid, note):
+    a = ASKS.get(cid)
+    if not a or not a.get("msg_id") or not STATE.get("chat_id"):
+        return
+    try:
+        telegram("editMessageText", {"chat_id": STATE["chat_id"], "message_id": a["msg_id"],
+                                     "text": (ask_text(a, a["idx"]) + "\n\n" + note)[:3900]})
+    except Exception as e:
+        log(f"ask_close failed: {e}")
+
+
+def ask_cancel_for_session(sid, note):
+    for cid in [c for c, a in ASKS.items() if a["sid"] == sid and not a["done"]]:
+        a = ASKS[cid]
+        a["done"] = True
+        a["answers"] = None
+        a["event"].set()
+        ask_close(cid, note)
+
+
+def ask_advance(cid):
+    a = ASKS[cid]
+    q = a["questions"][a["idx"]]
+    labels = [str((q.get("options") or [])[i].get("label", "")) for i in sorted(a["selected"])]
+    a["answers"][q.get("question", "")] = ", ".join(labels) if labels else ""
+    ask_close(cid, "→ " + (", ".join(labels) or "(empty)"))
+    a["idx"] += 1
+    a["selected"] = set()
+    a["msg_id"] = None
+    if a["idx"] >= len(a["questions"]):
+        a["done"] = True
+        a["event"].set()
+    else:
+        ask_send(cid)
+
+
+def handle_callback(cq):
+    if (cq.get("from") or {}).get("id") != OWNER_ID:
+        return
+    try:
+        telegram("answerCallbackQuery", {"callback_query_id": cq.get("id")})
+    except Exception:
+        pass
+    parts = (cq.get("data") or "").split("|")
+    if len(parts) != 3:
+        return
+    cid, qidx, choice = parts[0], parts[1], parts[2]
+    with LOCK:
+        STATE["last_tg"] = time.time()
+        save_state()
+        a = ASKS.get(cid)
+        if not a or a["done"] or str(a["idx"]) != qidx:
+            return
+        q = a["questions"][a["idx"]]
+        if choice == "t":
+            a["await_text"] = True
+            reply = "send your answer as a normal message"
+        elif choice == "d":
+            ask_advance(cid)
+            return
+        elif choice.isdigit():
+            i = int(choice)
+            if i >= len(q.get("options") or []):
+                return
+            if q.get("multiSelect"):
+                a["selected"].symmetric_difference_update({i})
+                try:
+                    telegram("editMessageReplyMarkup", {"chat_id": STATE["chat_id"], "message_id": a["msg_id"],
+                                                        "reply_markup": ask_keyboard(cid, a["idx"], q, a["selected"])})
+                except Exception:
+                    pass
+                return
+            a["selected"] = {i}
+            ask_advance(cid)
+            return
+        else:
+            return
+    reply_chat(reply)
+
+
+def ask_take_text(text):
+    with LOCK:
+        for cid, a in ASKS.items():
+            if a["done"] or not a.get("await_text"):
+                continue
+            q = a["questions"][a["idx"]]
+            a["answers"][q.get("question", "")] = text
+            a["await_text"] = False
+            ask_close(cid, "→ " + text[:100])
+            a["idx"] += 1
+            a["selected"] = set()
+            a["msg_id"] = None
+            if a["idx"] >= len(a["questions"]):
+                a["done"] = True
+                a["event"].set()
+            else:
+                ask_send(cid)
+            return True
+    return False
+
+
+def ask_start(sid, cwd, questions):
+    with LOCK:
+        if not remote_active() or not STATE.get("chat_id"):
+            return None
+        ASK_SEQ[0] += 1
+        cid = str(ASK_SEQ[0])
+        ASKS[cid] = {"sid": sid, "label": session_label(sid, cwd), "questions": questions, "idx": 0,
+                     "selected": set(), "answers": {}, "done": False, "await_text": False,
+                     "event": threading.Event(), "deadline": time.time() + ASK_WAIT, "msg_id": None}
+        ask_send(cid)
+    return {"cid": cid, "wait": ASK_WAIT, "mode": ASK_MODE}
+
+
+def ask_poll(cid):
+    with LOCK:
+        a = ASKS.get(cid)
+    if not a:
+        return {"keep": False}
+    a["event"].wait(timeout=25)
+    with LOCK:
+        if a["done"]:
+            ASKS.pop(cid, None)
+            return {"answers": a["answers"]} if a["answers"] else {"keep": False}
+        if time.time() > a["deadline"]:
+            a["done"] = True
+            ASKS.pop(cid, None)
+            ask_close(cid, "⌛ expired — answer in the app")
+            return {"keep": False}
+    return {"keep": True}
+
+
 def notify(sid, cwd, kind, text):
     h = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()
     with LOCK:
@@ -245,6 +413,7 @@ def handle_event(data):
             PENDING.clear()
             inject = pop_pending_locked(sid)
             save_state()
+            ask_cancel_for_session(sid, "↩️ cancelled — answered at the PC")
         return {"inject": inject}
     if ev == "SessionStart":
         with LOCK:
@@ -259,6 +428,11 @@ def handle_event(data):
         with LOCK:
             SESS_STATE[sid] = "asking"
         if tool == "AskUserQuestion":
+            questions = ti.get("questions") or []
+            if questions:
+                started = ask_start(sid, cwd, questions)
+                if started:
+                    return {"ask": started}
             notify(sid, cwd, "question", "❓ Question:\n" + format_questions(ti))
         elif tool == "ExitPlanMode":
             notify(sid, cwd, "plan", "📋 Plan awaiting approval:\n" + last_assistant_text(tp))
@@ -476,6 +650,8 @@ def handle_update(u):
     if not text:
         reply_chat("text messages only")
         return
+    if ask_take_text(text):
+        return
     if text.split()[0] == "/sessions":
         reply_chat(sessions_list())
         return
@@ -530,7 +706,10 @@ def poll_loop():
             for u in r.get("result", []):
                 offset = max(offset, u["update_id"] + 1)
                 try:
-                    handle_update(u)
+                    if u.get("callback_query"):
+                        handle_callback(u["callback_query"])
+                    else:
+                        handle_update(u)
                 except Exception as e:
                     log(f"update error: {e}")
         except Exception as e:
@@ -567,6 +746,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(hold_wait(sid))
             except Exception as e:
                 log(f"hold error: {e}")
+                self._json({"keep": False})
+            return
+        if parsed.path == "/ask-poll":
+            cid = (urllib.parse.parse_qs(parsed.query).get("cid") or [""])[0]
+            try:
+                self._json(ask_poll(cid))
+            except Exception as e:
+                log(f"ask-poll error: {e}")
                 self._json({"keep": False})
             return
         self.send_response(404)
@@ -630,7 +817,7 @@ def main():
         return
     threading.Thread(target=poll_loop, daemon=True).start()
     threading.Thread(target=send_loop, daemon=True).start()
-    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'} hold={HOLD_SECONDS}s")
+    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'} hold={HOLD_SECONDS}s grace={NOTIFY_GRACE}s ask={ASK_WAIT}s/{ASK_MODE}")
     server.serve_forever()
 
 

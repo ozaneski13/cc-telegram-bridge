@@ -51,7 +51,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
-            "timeout": 10
+            "timeout": 400
           }
         ]
       }

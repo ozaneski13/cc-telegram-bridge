@@ -88,6 +88,33 @@ def main():
         if inject:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": ev, "additionalContext": inject}}, ensure_ascii=False))
         return
+    if ev == "PreToolUse":
+        ask = resp.get("ask")
+        if not ask:
+            return
+        deadline = time.time() + int(ask.get("wait") or 0)
+        while time.time() < deadline:
+            try:
+                r = api(env, "GET", f"/ask-poll?cid={ask['cid']}", None, timeout=30)
+            except Exception:
+                return
+            answers = r.get("answers")
+            if answers:
+                if ask.get("mode") == "deny":
+                    lines = "; ".join(f"{q} -> {a}" for q, a in answers.items())
+                    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                  "permissionDecisionReason": "The user answered from Telegram: " + lines +
+                                                  ". Do not ask again — continue with these answers."}}
+                else:
+                    ti = dict(data.get("tool_input") or {})
+                    ti["answers"] = answers
+                    out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                  "updatedInput": ti}}
+                print(json.dumps(out, ensure_ascii=False))
+                return
+            if not r.get("keep"):
+                return
+        return
     if ev == "Stop":
         hold = int(resp.get("hold") or 0)
         if hold <= 0 or not sid:

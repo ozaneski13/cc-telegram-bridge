@@ -19,7 +19,8 @@ Everything uses official Claude Code mechanisms (a plugin, hooks, and the deskto
 | You are at the PC | Notifications wait 3 minutes (`NOTIFY_GRACE_SECONDS`). If you type anything in the app during that time, they are cancelled — your phone stays silent. |
 | You are away | After the grace period, the notification arrives on Telegram: `[session title #id]` + a summary of what Claude said. |
 | You reply from Telegram | "Live mode" turns on. Your reply is injected directly into the session and Claude continues. Follow-up answers reach your phone instantly (no grace delay). Sessions briefly wait at each turn end (`HOLD_SECONDS`, default 10 min) to catch your next reply. |
-| You come back to the PC | The moment you type anything in the app, live mode ends and everything returns to normal desk behavior. |
+| Claude asks a multiple-choice question while you are on the phone | It arrives with one inline button per option (plus "type an answer" for free text; multi-select supported). Tap and the session continues — the question never has to be answered at the PC. At the PC it simply opens in the app as usual; nothing waits. |
+| You come back to the PC | The moment you type anything in the app, live mode ends and everything returns to normal desk behavior. A question waiting on your phone is cancelled and opens in the app instead. |
 | You message a session that has been idle a long time | The message is queued. It is delivered automatically the next time that session wakes up (you type in it, or the app restarts). If you want instant delivery even then, see [Optional: bridge session](#optional-bridge-session). |
 
 Notification icons: `✅` answer finished · `🔄(N bg)` still working in background · `⏳` waiting for input · `❓` multiple-choice question · `📋` plan awaiting approval.
@@ -130,6 +131,8 @@ If it's closed, nothing breaks — queued messages are still delivered when the 
 | `PORT` | Local port, 127.0.0.1 only | `8765` |
 | `NOTIFY_GRACE_SECONDS` | How long notifications wait while you may be at the PC; `0` = near-immediate | `180` |
 | `HOLD_SECONDS` | How long sessions wait for your next phone reply in live mode | `600` |
+| `ASK_WAIT_SECONDS` | How long a multiple-choice question waits for your button tap (live mode only) | `300` |
+| `ASK_ANSWER_MODE` | `input` pre-fills the tool's answers; `deny` returns the answer as feedback text instead | `input` |
 | `IGNORE_CWD_SUBSTRINGS` | Comma-separated folder-name parts whose sessions never notify | `cc-telegram-bridge` |
 
 Restart the daemon after changing `.env`.
@@ -154,7 +157,8 @@ Restart the daemon after changing `.env`.
 
 ## Limitations
 
-- UI dialogs (question buttons, plan-approval, permission prompts) cannot be remotely clicked; your Telegram text arrives as a normal user message. Behavior against a pending dialog is still being validated; inline-keyboard answers are on the roadmap.
+- Multiple-choice questions are answerable from Telegram (inline buttons). Plan-approval and permission dialogs are not — they notify only, and your reply arrives as a normal message.
+- If a question still opens in the app after you tap a button, set `ASK_ANSWER_MODE=deny` and restart the daemon.
 - Reply injection needs Claude Code Desktop. Notifications alone work with anything that runs Claude Code hooks.
 - Windows-only as shipped (PowerShell scripts, Startup shortcut); the daemon itself is portable Python.
 

@@ -17,7 +17,8 @@ Her şey resmi Claude Code mekanizmalarıyla çalışır (plugin + hook'lar + uy
 | PC başındasın | Bildirim 3 dk bekler (`NOTIFY_GRACE_SECONDS`). Bu sürede app'te bir şey yazarsan iptal olur — telefon hiç titremez. |
 | Uzaktasın | Süre dolunca bildirim düşer: `[session başlığı #id]` + Claude'un söylediğinin özeti. |
 | Telefondan cevap yazdın | "Canlı mod" açılır. Cevabın session'a doğrudan enjekte edilir; sonraki cevaplar beklemesiz telefonuna gelir. Session'lar turn sonunda bir sonraki mesajını yakalamak için kısa süre bekler (`HOLD_SECONDS`, varsayılan 10 dk). |
-| PC'ye döndün | App'te bir şey yazdığın an canlı mod biter, her şey normale döner. |
+| Telefondayken Claude çoktan seçmeli soru sordu | Soru her seçenek için bir **butonla** gelir (+ serbest metin için "✍️ Type an answer"; çoklu seçim destekli). Butona bas, session devam etsin. PC'deysen soru normal şekilde app'te açılır, hiçbir şey beklemez. |
+| PC'ye döndün | App'te bir şey yazdığın an canlı mod biter, her şey normale döner. Telefonda bekleyen soru iptal olup app'te açılır. |
 | Uzun süredir boşta bir session'a yazdın | Mesaj kuyruklanır; o session uyanınca (içine yazınca veya app yeniden açılınca) otomatik iletilir. Anında iletim istersen: [Opsiyonel köprü](#opsiyonel-köprü-sessionı). |
 
 Bildirim ikonları: `✅` cevap bitti · `🔄(N bg)` arka planda iş sürüyor · `⏳` input bekliyor · `❓` çoktan seçmeli soru · `📋` plan onayı bekliyor.
@@ -128,6 +129,8 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 | `PORT` | Lokal port, sadece 127.0.0.1 | `8765` |
 | `NOTIFY_GRACE_SECONDS` | PC'deyken bildirimlerin bekleme süresi; `0` = anında | `180` |
 | `HOLD_SECONDS` | Canlı modda session'ın sonraki cevabını bekleme süresi | `600` |
+| `ASK_WAIT_SECONDS` | Çoktan seçmeli sorunun buton cevabını bekleme süresi (yalnız canlı modda) | `300` |
+| `ASK_ANSWER_MODE` | `input` cevabı tool'a doldurur; `deny` cevabı geri-bildirim metni olarak verir | `input` |
 | `IGNORE_CWD_SUBSTRINGS` | Bildirim atmayacak klasör adı parçaları (virgülle) | `cc-telegram-bridge` |
 
 `.env` değişince daemon'ı yeniden başlat.
@@ -152,7 +155,8 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 
 ## Sınırlar
 
-- UI dialoglarına (soru butonları, plan onayı, izin promptları) uzaktan "tıklanamaz"; Telegram metnin normal kullanıcı mesajı olarak düşer. Bekleyen dialog karşısındaki davranış hâlâ doğrulanıyor; inline-buton cevapları yol haritasında.
+- Çoktan seçmeli sorular Telegram'dan cevaplanabilir (inline butonlar). Plan onayı ve izin dialogları cevaplanamaz — sadece bildirim düşer, cevabın normal mesaj olarak gider.
+- Butona bastığın halde soru app'te yine açılıyorsa `.env`'de `ASK_ANSWER_MODE=deny` yapıp daemon'ı yeniden başlat.
 - Cevap enjeksiyonu Claude Code Desktop gerektirir; yalnız-bildirim tarafı hook çalıştıran her Claude Code'da işler.
 - Şu haliyle Windows-only (PowerShell script'leri, Startup kısayolu); daemon'ın kendisi taşınabilir Python.
 
