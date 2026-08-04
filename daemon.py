@@ -333,9 +333,11 @@ def apply_to_chat(row, field, value, shown):
     if not patch_session(row["cli"], field, value):
         return "could not write that chat's saved state"
     name = row["title"] or (Path(row["cwd"]).name if row["cwd"] else "?")
-    msg = f"{name} #{row['cli'][:8]} → {field} {shown}\nit opens with this next time"
+    msg = (f"{name} #{row['cli'][:8]} → {field} {shown}\n"
+           "saved into that chat's state: it will use this the next time you open the chat, not while it is already open")
     if time.time() - row["ts"] < 120:
-        msg += "\n⚠️ that chat looks active right now — the app rewrites its own state each turn, so close it first (or use 'global')"
+        msg += ("\n⚠️ that chat was active moments ago. The app rewrites its own state at the end of every turn, "
+                "so this will be erased before it ever reopens — close the chat first, or use 'global' for new chats.")
     return msg
 
 
