@@ -101,7 +101,11 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 | `/fast on\|off` | Toggles fast mode |
 | `/help` | Command list |
 
-`/model`, `/effort` and `/fast` write your Claude Code settings, so they apply to **sessions started afterwards**. `/model` and `/effort` are additionally stamped on the current target chat, which takes effect the next time you open that chat. `/usage` reads your plan limits with the login already stored on your machine — nothing extra to configure.
+**Scope rules.** `/model` and `/effort` change the **target chat** (pick it with `/sessions` + `/use N`); add `global` — e.g. `/model fable global` — to change the default for **new** chats instead. `/fast` is global only.
+
+A per-chat change is stored in that chat's saved state, so it applies the next time the chat is opened. The desktop app rewrites its own state for the chat you are actively using, so a chat that is open right now will overwrite the change — close it first, or use `global`. Switching the model of the chat you are typing in is not possible remotely; use the model picker in the app.
+
+`/usage` reads your plan limits with the login already stored on your machine — nothing extra to configure.
 
 Delivery confirmations you get back: `⚡ →` delivered live · `→ ... (session idle)` queued for when the session wakes.
 

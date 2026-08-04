@@ -234,6 +234,25 @@ def patch_session(cli_sid, field, value):
         return False
 
 
+def list_ccd_sessions(limit=10):
+    out = []
+    try:
+        for p in CCD_SESSIONS_DIR.rglob("local_*.json"):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if d.get("isArchived") or not d.get("cliSessionId"):
+                continue
+            out.append({"cli": d["cliSessionId"], "local": d.get("sessionId"), "title": d.get("title") or "",
+                        "cwd": d.get("cwd") or "", "model": d.get("model") or "", "effort": d.get("effort") or "",
+                        "ts": (d.get("lastActivityAt") or 0) / 1000.0, "path": str(p)})
+    except Exception as e:
+        log(f"session scan failed: {e}")
+    out.sort(key=lambda r: r["ts"], reverse=True)
+    return out[:limit]
+
+
 def bar(pct):
     filled = max(0, min(10, round(pct / 10)))
     return "█" * filled + "░" * (10 - filled)
@@ -290,43 +309,58 @@ def status_text():
             f"target chat: {target}\n\n" + usage_text())
 
 
-def set_model(arg):
+def split_scope(arg):
+    parts = arg.split()
+    if len(parts) > 1 and parts[-1].lower() in ("global", "default", "new", "all"):
+        return " ".join(parts[:-1]).strip(), True
+    return arg.strip(), False
+
+
+def apply_default(field, value):
     s = read_settings()
     if s is None:
         return "settings.json unreadable"
-    cur = str(s.get("model") or "")
-    key = arg.strip().lower()
-    suffix = "[1m]" if cur.endswith("[1m]") and not key.endswith("[1m]") else ""
+    s[field] = value
+    return None if write_settings(s) else "could not write settings"
+
+
+def set_model(arg):
+    raw, is_global = split_scope(arg)
+    key = raw.lower()
     base = key[:-4] if key.endswith("[1m]") else key
     if base not in MODEL_IDS:
-        return "usage: /model opus|sonnet|fable|haiku (add [1m] for 1M context)"
-    s["model"] = base + (("[1m]" if key.endswith("[1m]") else "") or suffix)
-    if not write_settings(s):
-        return "could not write settings"
-    msg = f"model → {s['model']} (new sessions)"
+        return "usage: /model opus|sonnet|fable|haiku [global]  (add [1m] for 1M context)"
+    if is_global:
+        cur = str((read_settings() or {}).get("model") or "")
+        val = base + ("[1m]" if key.endswith("[1m]") or cur.endswith("[1m]") else "")
+        err = apply_default("model", val)
+        return err or f"default model → {val} (applies to new chats)"
     with LOCK:
         last = STATE.get("last_session")
-    if last and patch_session(last, "model", MODEL_IDS[base]):
-        msg += f"\nalso set on #{last[:8]} — takes effect when you reopen that chat"
-    return msg
+    if not last:
+        return "no target chat — pick one with /sessions and /use N (or add 'global' to change the default)"
+    if not patch_session(last, "model", MODEL_IDS[base]):
+        return "could not write that chat's settings"
+    return (f"#{last[:8]} model → {base}\nopens with it next time. If that chat is open right now, close it first — "
+            "the app rewrites its own state on every turn. Use 'global' to change new chats instead.")
 
 
 def set_effort(arg):
-    lvl = arg.strip().lower()
+    raw, is_global = split_scope(arg)
+    lvl = raw.lower()
     if lvl not in EFFORTS:
-        return "usage: /effort low|medium|high|xhigh"
-    s = read_settings()
-    if s is None:
-        return "settings.json unreadable"
-    s["effortLevel"] = lvl
-    if not write_settings(s):
-        return "could not write settings"
-    msg = f"effort → {lvl} (new sessions)"
+        return "usage: /effort low|medium|high|xhigh [global]"
+    if is_global:
+        err = apply_default("effortLevel", lvl)
+        return err or f"default effort → {lvl} (applies to new chats)"
     with LOCK:
         last = STATE.get("last_session")
-    if last and patch_session(last, "effort", lvl):
-        msg += f"\nalso set on #{last[:8]} — takes effect when you reopen that chat"
-    return msg
+    if not last:
+        return "no target chat — pick one with /sessions and /use N (or add 'global')"
+    if not patch_session(last, "effort", lvl):
+        return "could not write that chat's settings"
+    return (f"#{last[:8]} effort → {lvl}\nopens with it next time. If that chat is open right now, close it first — "
+            "the app rewrites its own state on every turn.")
 
 
 def set_fast(arg):
@@ -351,10 +385,10 @@ def set_fast(arg):
 HELP_TEXT = ("Commands\n"
              "/usage — plan limits\n"
              "/status — defaults + target chat + usage\n"
-             "/sessions — recent chats\n"
+             "/sessions — recent chats (model/effort shown)\n"
              "/use N — switch target chat\n"
-             "/model opus|sonnet|fable|haiku\n"
-             "/effort low|medium|high|xhigh\n"
+             "/model opus|sonnet|fable|haiku — target chat (add 'global' for new chats)\n"
+             "/effort low|medium|high|xhigh — target chat (add 'global')\n"
              "/fast on|off\n\n"
              "Reply to a notification to answer that chat; a plain message goes to the target chat.")
 
@@ -741,17 +775,29 @@ def humanize(ts):
 
 
 def sessions_list():
+    rows = list_ccd_sessions()
     with LOCK:
-        rec = list(STATE.get("recent", []))
         last = STATE.get("last_session")
-    if not rec:
-        return "no notifications yet"
+    if not rows:
+        return "no chats found"
+    short = {"claude-opus-5": "opus", "claude-fable-5": "fable", "claude-sonnet-5": "sonnet"}
     lines = []
-    for i, r in enumerate(rec, 1):
-        proj = session_label(r["session_id"], r.get("cwd", ""))
-        mark = " *" if r["session_id"] == last else ""
-        lines.append(f"{i}. {proj} #{r['session_id'][:8]} — {humanize(r['ts'])}{mark}")
+    for i, r in enumerate(rows, 1):
+        name = r["title"] or (Path(r["cwd"]).name if r["cwd"] else "?")
+        mark = " *" if r["cli"] == last else ""
+        model = short.get(r["model"], (r["model"] or "").replace("claude-", ""))
+        lines.append(f"{i}. {name[:34]} #{r['cli'][:8]} · {model}/{r['effort']} · {humanize(r['ts'])}{mark}")
     return "\n".join(lines)
+
+
+def resolve_target(arg):
+    rows = list_ccd_sessions(20)
+    if arg.isdigit() and 1 <= int(arg) <= len(rows):
+        return rows[int(arg) - 1]
+    for r in rows:
+        if arg and (r["cli"].startswith(arg) or arg.lower() in (r["title"] or "").lower()):
+            return r
+    return None
 
 
 def reply_chat(text):
@@ -850,24 +896,16 @@ def handle_update(u):
         reply_chat(sessions_list())
         return
     if cmd == "/use":
-        with LOCK:
-            rec = list(STATE.get("recent", []))
-        target = None
-        if arg.isdigit() and 1 <= int(arg) <= len(rec):
-            target = rec[int(arg) - 1]
-        else:
-            for r in rec:
-                if r["session_id"].startswith(arg) and arg:
-                    target = r
-                    break
+        target = resolve_target(arg)
         if not target:
             reply_chat("not found — list with /sessions")
             return
         with LOCK:
-            STATE["last_session"] = target["session_id"]
+            STATE["last_session"] = target["cli"]
+            update_recent(target["cli"], target["cwd"])
             save_state()
-        proj = session_label(target["session_id"], target.get("cwd", ""))
-        reply_chat(f"active: {proj} #{target['session_id'][:8]}")
+        name = target["title"] or (Path(target["cwd"]).name if target["cwd"] else "?")
+        reply_chat(f"active: {name} #{target['cli'][:8]}")
         return
     target = None
     rt = msg.get("reply_to_message")

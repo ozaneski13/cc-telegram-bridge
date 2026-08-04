@@ -98,7 +98,11 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 | `/fast on\|off` | Fast mode açar/kapatır |
 | `/help` | Komut listesi |
 
-`/model`, `/effort` ve `/fast` Claude Code ayarlarını yazar; yani **bundan sonra açılan session'lara** uygulanır. `/model` ve `/effort` ayrıca aktif hedef chat'e de işlenir — o chat'i yeniden açtığında geçerli olur. `/usage` makinendeki mevcut Claude oturumunu kullanır, ek kurulum gerekmez.
+**Kapsam kuralı.** `/model` ve `/effort` **hedef chat'i** değiştirir (`/sessions` + `/use N` ile seç); sonuna `global` eklersen — `/model fable global` — bunun yerine **yeni** chat'lerin varsayılanı değişir. `/fast` yalnızca globaldir.
+
+Chat bazlı değişiklik o chat'in kayıtlı durumuna yazılır, yani chat bir dahaki açılışında geçerli olur. Uygulama, aktif kullandığın chat'in durumunu her turda kendisi yeniden yazdığı için **şu an açık olan** bir chat değişikliği ezer — önce o chat'i kapat, ya da `global` kullan. Halihazırda içinde yazdığın chat'in modelini uzaktan değiştirmek mümkün değil; app'teki model seçiciyi kullan.
+
+`/usage` makinendeki mevcut Claude oturumunu kullanır, ek kurulum gerekmez.
 
 Dönen onaylar: `⚡ →` canlı iletildi · `→ ... (session idle)` kuyruklandı, session uyanınca iletilecek.
 
