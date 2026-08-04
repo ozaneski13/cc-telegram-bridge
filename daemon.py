@@ -36,6 +36,7 @@ OWNER_ID = int(ENV.get("TELEGRAM_OWNER_ID", "0") or "0")
 SECRET = ENV.get("BRIDGE_SECRET", "")
 PORT = int(ENV.get("PORT", "8765") or "8765")
 HOLD_SECONDS = int(ENV.get("HOLD_SECONDS", "600") or "600")
+NOTIFY_GRACE = int(ENV.get("NOTIFY_GRACE_SECONDS", "180") or "180")
 IGNORE_CWD = [s.strip().lower() for s in ENV.get("IGNORE_CWD_SUBSTRINGS", "cc-telegram-bridge").split(",") if s.strip()]
 
 LOCK = threading.Lock()
@@ -183,7 +184,8 @@ def format_questions(tool_input):
 def notify(sid, cwd, kind, text):
     h = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()
     with LOCK:
-        PENDING[sid] = {"due": time.time() + 3, "kind": kind, "hash": h, "text": text, "cwd": cwd}
+        delay = 3 if remote_active() else max(3, NOTIFY_GRACE)
+        PENDING[sid] = {"due": time.time() + delay, "kind": kind, "hash": h, "text": text, "cwd": cwd}
 
 
 def prune_pending_locked():
@@ -240,6 +242,7 @@ def handle_event(data):
             STATE["last_local"] = time.time()
             SESS_STATE[sid] = "running"
             release_holds_locked()
+            PENDING.clear()
             inject = pop_pending_locked(sid)
             save_state()
         return {"inject": inject}
@@ -465,6 +468,9 @@ def handle_update(u):
         STATE["last_tg"] = time.time()
         if STATE.get("chat_id") != chat_id:
             STATE["chat_id"] = chat_id
+        now = time.time()
+        for item in PENDING.values():
+            item["due"] = min(item["due"], now)
         save_state()
     text = (msg.get("text") or "").strip()
     if not text:

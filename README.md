@@ -16,6 +16,7 @@ Everything runs through official Claude Code mechanisms: a [plugin](https://code
 
 - **All sessions, one bot** — hooks are global; every Claude Code Desktop session notifies, tagged `[session title #sessionid]`.
 - **Live mode (zero-setup replies)** — once you message from Telegram, sessions hold briefly at each turn end (`HOLD_SECONDS`, default 10 min) and your replies are injected directly via the official Stop-hook `decision: block` mechanism. No bridge session, no daily setup. Typing anything locally instantly returns everything to normal desk behavior.
+- **At-the-PC quietness** — notifications wait a grace period (`NOTIFY_GRACE_SECONDS`, default 3 min) before going to Telegram; if you react in the app meanwhile (type any prompt), pending notifications are cancelled. In live mode the grace is skipped, so phone conversations stay instant.
 - **Event types** — response finished (`✅`), still working in background (`🔄(N bg)`), waiting for input (`⏳`), multiple-choice question (`❓`), plan awaiting approval (`📋`).
 - **Reply routing** — swipe-reply to a notification to answer that exact session; plain messages go to the most recent one; `/sessions` and `/use` to switch targets.
 - **Self-healing** — the hook forwarder starts the daemon if it is down; single-instance guard; everything fails silent so your sessions are never blocked.

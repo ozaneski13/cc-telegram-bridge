@@ -23,6 +23,11 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 5. Botuna bir DM at (chat bağlanır; sadece senin ID'in kabul edilir).
 6. Cevap kanalı için herhangi bir session'da `/cc-telegram-bridge` çalıştır ve o session'ı açık bırak. Kapalıysa bildirimler akmaya devam eder, cevaplar kuyruklanır.
 
+## Akıllı bildirim davranışı
+
+- **PC'deysen:** bildirim `NOTIFY_GRACE_SECONDS` (varsayılan 180 sn) bekler; bu sürede app'te herhangi bir prompt yazarsan bekleyen bildirimler iptal olur (telefon hiç titremez).
+- **Telefondaysan (canlı mod):** Telegram'dan yazdığın andan itibaren bildirimler beklemesiz gelir ve cevapların session'lara anında enjekte edilir (`HOLD_SECONDS`, varsayılan 600 sn). Boşta kalmış session'a mesaj kuyruklanır, session uyanınca otomatik iletilir.
+
 ## Günlük kullanım
 
 - İkonlar: `✅` cevap bitti · `🔄(N bg)` arka planda iş sürüyor · `⏳` input bekliyor · `❓` çoktan seçmeli soru · `📋` plan onayı.
