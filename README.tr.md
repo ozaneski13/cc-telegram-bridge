@@ -89,8 +89,8 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 |---|---|
 | Bildirime swipe-reply | Metnin tam o session'a gider |
 | Düz mesaj | En son bildirim atan session'a gider |
-| `/sessions` | Son session'ları numaralı listeler (`*` = aktif hedef) |
-| `/use 2` veya `/use a1b2` | Düz mesajların hedefini değiştirir |
+| `/sessions` | App'teki sohbetlerini numaralı listeler; model ve effort'larıyla (`*` = aktif hedef) |
+| `/use 2`, `/use a1b2`, `/use drift` | Düz mesajların hedefini değiştirir (numara, id veya başlık) |
 | `/usage` | Plan limitlerin: 5 saatlik ve haftalık pencereler + sıfırlanma saatleri |
 | `/status` | Mevcut varsayılanlar + hedef chat + kullanım, tek mesajda |
 | `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Modeli değiştirir (1M context için sonuna `[1m]`) |
@@ -164,6 +164,7 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 - Daemon sadece **127.0.0.1** dinler; hook çağrıları ortak sırla doğrulanır.
 - Sadece senin Telegram id'in kabul edilir — botunu bulan bir yabancının yapabileceği hiçbir şey yok.
 - Bot token'ın yalnızca lokal `.env`'de yaşar (gitignore'da). Başka hiçbir yerde saklanmaz.
+- `/usage` Claude Code'un makinende zaten sakladığı OAuth token'ını okur ve yalnızca Anthropic'in kendi API'sine gönderir. `/model` ve `/effort` yalnızca hedeflenen sohbetin model/effort alanını yazar; `global` ile (ve `/fast` her zaman) `~/.claude/settings.json` içindeki sadece `model`/`effortLevel`/`fastMode` anahtarlarını düzenler — `.bridge-bak` yedeği alınır, dosya yazımdan önce doğrulanır, geçersiz değer reddedilir.
 - **Claude cevaplarının özetleri Telegram sunucularından geçer.** Hassas projeler için klasör adını `IGNORE_CWD_SUBSTRINGS`'e ekle.
 - Repoda binary yok; iki exe'yi de okunabilir, bağımlılıksız Python kaynağından kendin derliyorsun.
 

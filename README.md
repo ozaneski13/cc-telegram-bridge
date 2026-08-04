@@ -92,8 +92,8 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 |---|---|
 | Swipe-reply to a notification | Your text goes to that exact session |
 | A plain message | Goes to the most recently notified session |
-| `/sessions` | Lists recent sessions, numbered (`*` = current target) |
-| `/use 2` or `/use a1b2` | Switches the target for plain messages |
+| `/sessions` | Lists your chats from the app, numbered, with their model and effort (`*` = current target) |
+| `/use 2`, `/use a1b2`, `/use drift` | Switches the target for plain messages (number, id, or title) |
 | `/usage` | Your plan limits: 5-hour and weekly windows with reset times |
 | `/status` | Current defaults, target chat, and usage in one message |
 | `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Sets the model (append `[1m]` for 1M context) |
@@ -165,7 +165,8 @@ Restart the daemon after changing `.env`.
 ## Security & privacy
 
 - The daemon listens on **127.0.0.1 only**; hook calls are authenticated with a shared secret.
-- `/usage` reads the OAuth token Claude Code already stores locally and sends it only to Anthropic's own API. `/model`, `/effort` and `/fast` edit only those three keys in `~/.claude/settings.json`, keep a `.bridge-bak` copy, and validate the file before replacing it.
+- `/usage` reads the OAuth token Claude Code already stores locally and sends it only to Anthropic's own API.
+- `/model` and `/effort` write only the model/effort field of the named chat's saved state. With `global` (and `/fast` always) they instead edit only `model`, `effortLevel` or `fastMode` in `~/.claude/settings.json`, keeping a `.bridge-bak` copy and validating the file before replacing it. Any other value is rejected.
 - Only your Telegram id is accepted — there is nothing a stranger can do by finding your bot.
 - Your bot token lives only in your local `.env` (gitignored). No secrets are stored anywhere else.
 - **Summaries of Claude's answers travel through Telegram's servers.** For sensitive projects, add the folder name to `IGNORE_CWD_SUBSTRINGS`.
