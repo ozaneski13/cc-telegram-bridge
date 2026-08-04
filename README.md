@@ -1,36 +1,43 @@
 # cc-telegram-bridge
 
-Two-way Telegram bridge for **Claude Code Desktop** on Windows. Get a Telegram notification whenever *any* of your Claude Code sessions finishes a response, asks a question, or waits for input — and reply from your phone, routed back into the correct session.
+Control your **Claude Code Desktop** sessions from Telegram.
 
-```
-Claude Code session (any) ──hook POST──> daemon (127.0.0.1:8765)
-                                           ├─ Telegram sendMessage (notification)
-                                           └─ getUpdates long-poll
-Telegram reply ──> daemon ──append──> inbox.jsonl ──file watch──> bridge session
-                                                     └─ send_message(target_session, text)
-```
+- When Claude finishes an answer, asks a question, or waits for you — you get a Telegram message.
+- You reply on your phone — your reply goes straight into the right session, and Claude keeps working.
+- When you are at your PC, nothing buzzes: notifications are held for a few minutes and cancelled if you react in the app.
 
-Everything runs through official Claude Code mechanisms: a [plugin](https://code.claude.com/docs/en/plugins) carries the hooks and the bridge skill, [hooks](https://code.claude.com/docs/en/hooks) push the events, and the desktop app's own session-management tool delivers replies as user turns. No patched binaries, no unofficial APIs.
+Everything uses official Claude Code mechanisms (a plugin, hooks, and the desktop app's own tools). No patched binaries.
 
-## Features
+*Türkçe dokümantasyon: [README.tr.md](README.tr.md)*
 
-- **All sessions, one bot** — hooks are global; every Claude Code Desktop session notifies, tagged `[session title #sessionid]`.
-- **Live mode (zero-setup replies)** — once you message from Telegram, sessions hold briefly at each turn end (`HOLD_SECONDS`, default 10 min) and your replies are injected directly via the official Stop-hook `decision: block` mechanism. No bridge session, no daily setup. Typing anything locally instantly returns everything to normal desk behavior.
-- **At-the-PC quietness** — notifications wait a grace period (`NOTIFY_GRACE_SECONDS`, default 3 min) before going to Telegram; if you react in the app meanwhile (type any prompt), pending notifications are cancelled. In live mode the grace is skipped, so phone conversations stay instant.
-- **Event types** — response finished (`✅`), still working in background (`🔄(N bg)`), waiting for input (`⏳`), multiple-choice question (`❓`), plan awaiting approval (`📋`).
-- **Reply routing** — swipe-reply to a notification to answer that exact session; plain messages go to the most recent one; `/sessions` and `/use` to switch targets.
-- **Self-healing** — the hook forwarder starts the daemon if it is down; single-instance guard; everything fails silent so your sessions are never blocked.
-- **Noise control** — per-session coalescing and dedupe, global rate cap, `IGNORE_CWD_SUBSTRINGS` to mute whole projects.
-- **Dry-run mode** — without a bot token the daemon logs would-be messages to `logs/outbox.log`, so you can verify the pipeline before touching Telegram.
+---
+
+## How it behaves
+
+| Situation | What happens |
+|---|---|
+| You are at the PC | Notifications wait 3 minutes (`NOTIFY_GRACE_SECONDS`). If you type anything in the app during that time, they are cancelled — your phone stays silent. |
+| You are away | After the grace period, the notification arrives on Telegram: `[session title #id]` + a summary of what Claude said. |
+| You reply from Telegram | "Live mode" turns on. Your reply is injected directly into the session and Claude continues. Follow-up answers reach your phone instantly (no grace delay). Sessions briefly wait at each turn end (`HOLD_SECONDS`, default 10 min) to catch your next reply. |
+| You come back to the PC | The moment you type anything in the app, live mode ends and everything returns to normal desk behavior. |
+| You message a session that has been idle a long time | The message is queued. It is delivered automatically the next time that session wakes up (you type in it, or the app restarts). If you want instant delivery even then, see [Optional: bridge session](#optional-bridge-session). |
+
+Notification icons: `✅` answer finished · `🔄(N bg)` still working in background · `⏳` waiting for input · `❓` multiple-choice question · `📋` plan awaiting approval.
+
+---
 
 ## Requirements
 
 - Windows 10/11
-- [Claude Code Desktop](https://claude.com/claude-code) (the bridge relays replies through the desktop app's session tools)
+- [Claude Code Desktop](https://claude.com/claude-code), logged in
 - A Telegram account
-- Python 3.10+ **only to build** the two executables (not needed at runtime)
+- Python 3.10+ (used once, to build the two executables)
 
-## Install
+---
+
+## Setup — step by step
+
+**1. Get the code and install:**
 
 ```powershell
 git clone https://github.com/ozaneski13/cc-telegram-bridge.git
@@ -38,68 +45,119 @@ cd cc-telegram-bridge
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-`setup.ps1` is idempotent: it builds the executables if missing (via `build.ps1`), installs the plugin to `~/.claude/skills/cc-telegram-bridge` (auto-loads in new sessions as `cc-telegram-bridge@skills-dir`), records the app location in `home.txt`, creates a Startup shortcut, generates a `BRIDGE_SECRET` if absent, starts the daemon, and health-checks it.
+`setup.ps1` does everything local: builds the executables (first run only), installs the Claude Code plugin, sets up autostart, and starts the background daemon. You can re-run it any time; it is safe.
 
-## Activate Telegram
+**2. Create your Telegram bot:**
 
-1. DM [@BotFather](https://t.me/BotFather), send `/newbot`, copy the token.
-2. DM [@userinfobot](https://t.me/userinfobot) to get your numeric user id.
-3. Put both into `.env` (`BOT_TOKEN=...`, `TELEGRAM_OWNER_ID=...`).
-4. Restart the daemon (see table below).
-5. Send your bot one DM — that binds the chat. Only messages from `TELEGRAM_OWNER_ID` are accepted; everything else is silently dropped.
-6. Replies work out of the box (live mode). The optional `/cc-telegram-bridge` relay session is only needed if you want **instant** delivery into sessions that have been idle for longer than the hold window — otherwise such messages are queued and injected automatically the next time that session wakes (you type in it, or it restarts).
+1. In Telegram, open [@BotFather](https://t.me/BotFather) and send `/newbot`.
+2. Give it a name, then a username ending in `bot` (e.g. `my_claude_bot`).
+3. BotFather replies with a **token** like `123456789:AAH...` — copy it.
 
-## Daily driving
+**3. Find your numeric Telegram id:**
 
-| You send | What happens |
+1. Open [@userinfobot](https://t.me/userinfobot) and press Start.
+2. It replies with your id, e.g. `412587349`.
+
+**4. Put both into the `.env` file** (in the project folder):
+
+```
+BOT_TOKEN=123456789:AAH...
+TELEGRAM_OWNER_ID=412587349
+```
+
+This file stays on your machine only — it is gitignored and never leaves your PC.
+
+**5. Restart the daemon** so it picks up the token:
+
+```powershell
+taskkill /IM cc-telegram-bridge.exe /F
+.\cc-telegram-bridge.exe
+```
+
+**6. Send your bot one DM** (anything, e.g. "hi"). This binds the chat. Only messages from your id are accepted; everyone else is silently ignored.
+
+**7. Restart the Claude Code Desktop app once.** The plugin loads when a session starts, so chats that were already open before the install stay silent until reopened. One app restart fixes all of them at once.
+
+**8. Test:** open a chat, ask something, then don't touch the app. After the grace period (3 min) the answer should appear on your phone. Swipe-reply to it — Claude should continue with your reply.
+
+That's the whole setup. From now on everything is automatic: the daemon starts at logon, and any Claude activity restarts it if it ever stops.
+
+---
+
+## Daily use
+
+| You send on Telegram | What happens |
 |---|---|
-| swipe-reply to a notification | Your text lands in that notification's session as a user message |
-| plain message | Goes to the most recently notified session |
-| `/sessions` | Numbered list of recent sessions (`*` = current target) |
-| `/use 2` or `/use a1b2` | Switch the current target |
+| Swipe-reply to a notification | Your text goes to that exact session |
+| A plain message | Goes to the most recently notified session |
+| `/sessions` | Lists recent sessions, numbered (`*` = current target) |
+| `/use 2` or `/use a1b2` | Switches the target for plain messages |
 
-Delivery confirmations: `⚡ →` injected live (session was holding or mid-turn); `→ ... (session idle ...)` queued — delivered when that session next wakes, or instantly if the optional bridge session is running.
+Delivery confirmations you get back: `⚡ →` delivered live · `→ ... (session idle)` queued for when the session wakes.
 
-## Operating the daemon
+---
+
+## Optional: bridge session
+
+Live mode covers active conversations. If you also want **instant** delivery into sessions that have been idle longer than the hold window, open one dedicated relay session:
+
+1. In Claude Code, open a new session **in the `cc-telegram-bridge` folder** (so it doesn't notify about itself).
+2. Type `/cc-telegram-bridge` and leave it open.
+
+If it's closed, nothing breaks — queued messages are still delivered when the target session wakes up.
+
+---
+
+## Managing the daemon
 
 | Action | Command |
 |---|---|
-| Status | `curl.exe http://127.0.0.1:8765/health` → `ok` |
-| Stop | `curl.exe -X POST http://127.0.0.1:8765/shutdown -H "X-Bridge-Token: <BRIDGE_SECRET>"` |
-| Start | run `cc-telegram-bridge.exe` (or just use Claude — the hook auto-starts it) |
-| Rebuild | `powershell -ExecutionPolicy Bypass -File build.ps1` |
+| Is it running? | `curl.exe http://127.0.0.1:8765/health` → `ok` |
+| Stop | `curl.exe -X POST http://127.0.0.1:8765/shutdown -H "X-Bridge-Token: <BRIDGE_SECRET from .env>"` |
+| Start | run `cc-telegram-bridge.exe` (or just use Claude — hooks auto-start it) |
+| Rebuild after code changes | `powershell -ExecutionPolicy Bypass -File build.ps1` then re-run `setup.ps1` |
+| Disable the plugin | `claude plugin disable cc-telegram-bridge@skills-dir` |
+
+---
 
 ## Configuration (`.env`)
 
-See [.env.example](.env.example). `BOT_TOKEN`, `TELEGRAM_OWNER_ID`, `BRIDGE_SECRET`, `PORT`, `IGNORE_CWD_SUBSTRINGS`. The daemon reads `.env` at startup — restart after changes. **Never commit `.env`** (it is gitignored).
+| Key | Meaning | Default |
+|---|---|---|
+| `BOT_TOKEN` | Your bot's token from BotFather | — |
+| `TELEGRAM_OWNER_ID` | Your numeric Telegram id; only this id is accepted | — |
+| `BRIDGE_SECRET` | Shared secret between hooks and daemon (auto-generated) | — |
+| `PORT` | Local port, 127.0.0.1 only | `8765` |
+| `NOTIFY_GRACE_SECONDS` | How long notifications wait while you may be at the PC; `0` = near-immediate | `180` |
+| `HOLD_SECONDS` | How long sessions wait for your next phone reply in live mode | `600` |
+| `IGNORE_CWD_SUBSTRINGS` | Comma-separated folder-name parts whose sessions never notify | `cc-telegram-bridge` |
+
+Restart the daemon after changing `.env`.
+
+---
 
 ## Moving to another PC (same Claude account)
 
-1. **On the old PC:** stop the daemon (`taskkill /IM cc-telegram-bridge.exe /F`) and delete `shell:startup\cc-telegram-bridge.lnk`. Two machines polling one bot token conflict (Telegram 409) and produce duplicate notifications.
-2. Copy the folder (or `git clone` and copy your `.env` across; copying `state.json` too preserves the chat binding).
-3. Run `setup.ps1` on the new PC. Done — the install is location- and username-independent.
+1. On the **old** PC: `taskkill /IM cc-telegram-bridge.exe /F` and delete `shell:startup\cc-telegram-bridge.lnk`. (Two PCs polling one bot token conflict and cause duplicate notifications.)
+2. Copy the project folder to the new PC — or `git clone` it and copy just your `.env` (and optionally `state.json`, which keeps the chat binding).
+3. On the **new** PC run `setup.ps1`, then restart the Claude app once. Done — nothing is tied to a username or folder location.
+
+---
 
 ## Security & privacy
 
-- The daemon binds **127.0.0.1 only**; hook requests are authenticated with an `X-Bridge-Token` shared secret.
-- Only your numeric Telegram id is accepted; there is no pairing surface for strangers.
-- Your bot token lives only in your local `.env`.
-- **Conversation excerpts transit Telegram's servers.** If a project is sensitive, add its folder name to `IGNORE_CWD_SUBSTRINGS`.
-- Executables are not shipped in the repo; you build them locally from the sources you can read (`daemon.py`, `plugin/hooks/notify_event.py` — stdlib only, no dependencies).
+- The daemon listens on **127.0.0.1 only**; hook calls are authenticated with a shared secret.
+- Only your Telegram id is accepted — there is nothing a stranger can do by finding your bot.
+- Your bot token lives only in your local `.env` (gitignored). No secrets are stored anywhere else.
+- **Summaries of Claude's answers travel through Telegram's servers.** For sensitive projects, add the folder name to `IGNORE_CWD_SUBSTRINGS`.
+- No binaries ship in this repo; you build both executables locally from readable, stdlib-only Python.
 
 ## Limitations
 
-- Interactive UI prompts (question buttons, plan-approval dialogs, permission dialogs) cannot be remotely "clicked". Your Telegram text is delivered as a queued user message; exact behavior against a pending dialog is still being validated. Inline-keyboard answering is on the roadmap behind a feasibility spike.
-- The reply relay requires the desktop app (an open bridge session); notifications alone work with any Claude Code flavor that runs hooks.
-- Windows-only as shipped (paths, Startup shortcut, PowerShell scripts). The daemon itself is portable Python.
-
-## Official alternatives
-
-- [`telegram@claude-plugins-official`](https://github.com/anthropics/claude-plugins-official) (channels): binds **one dedicated CLI session** to Telegram — a phone-first assistant rather than a monitor for your existing sessions.
-- Remote Control + the Claude mobile app: Anthropic's official remote monitoring/approval surface, not Telegram-based.
+- UI dialogs (question buttons, plan-approval, permission prompts) cannot be remotely clicked; your Telegram text arrives as a normal user message. Behavior against a pending dialog is still being validated; inline-keyboard answers are on the roadmap.
+- Reply injection needs Claude Code Desktop. Notifications alone work with anything that runs Claude Code hooks.
+- Windows-only as shipped (PowerShell scripts, Startup shortcut); the daemon itself is portable Python.
 
 ## License
 
 [MIT](LICENSE) — © 2026 Ozan Eşki.
-
-Türkçe dokümantasyon için: [README.tr.md](README.tr.md)
