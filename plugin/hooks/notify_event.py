@@ -37,13 +37,19 @@ def read_env():
     return env
 
 
-def post(env, data):
+def api(env, method, path, payload=None, timeout=4):
     req = urllib.request.Request(
-        f"http://127.0.0.1:{env.get('PORT', '8765')}/event",
-        data=json.dumps(data).encode("utf-8"),
+        f"http://127.0.0.1:{env.get('PORT', '8765')}{path}",
+        data=(json.dumps(payload).encode("utf-8") if payload is not None else None),
         headers={"Content-Type": "application/json", "X-Bridge-Token": env.get("BRIDGE_SECRET", "")},
+        method=method,
     )
-    urllib.request.urlopen(req, timeout=2).read()
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        body = r.read().decode("utf-8", "replace")
+    try:
+        return json.loads(body)
+    except Exception:
+        return {}
 
 
 def start_daemon():
@@ -54,26 +60,52 @@ def start_daemon():
     return True
 
 
+def post_event(env, data):
+    try:
+        return api(env, "POST", "/event", data)
+    except Exception:
+        pass
+    if not start_daemon():
+        return None
+    time.sleep(1.5)
+    try:
+        return api(env, "POST", "/event", data)
+    except Exception:
+        return None
+
+
 def main():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
         return
-    if data.get("hook_event_name") == "Stop" and data.get("stop_hook_active"):
-        return
+    ev = data.get("hook_event_name")
+    sid = data.get("session_id") or ""
     env = read_env()
-    try:
-        post(env, data)
+    resp = post_event(env, data) or {}
+    if ev in ("UserPromptSubmit", "SessionStart"):
+        inject = resp.get("inject")
+        if inject:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": ev, "additionalContext": inject}}, ensure_ascii=False))
         return
-    except Exception:
-        pass
-    if not start_daemon():
-        return
-    time.sleep(1.5)
-    try:
-        post(env, data)
-    except Exception:
-        pass
+    if ev == "Stop":
+        hold = int(resp.get("hold") or 0)
+        if hold <= 0 or not sid:
+            return
+        deadline = time.time() + hold
+        while time.time() < deadline:
+            try:
+                r = api(env, "GET", f"/hold?sid={sid}", None, timeout=30)
+            except Exception:
+                return
+            if r.get("reply"):
+                reason = ("[Telegram] The user sent this follow-up from their phone:\n" + r["reply"] +
+                          "\nTreat it as a normal user message and act on it.")
+                print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+                return
+            if not r.get("keep"):
+                return
+    return
 
 
 if __name__ == "__main__":

@@ -14,7 +14,8 @@ Everything runs through official Claude Code mechanisms: a [plugin](https://code
 
 ## Features
 
-- **All sessions, one bot** — hooks are global; every Claude Code Desktop session notifies, tagged `[project #sessionid]`.
+- **All sessions, one bot** — hooks are global; every Claude Code Desktop session notifies, tagged `[session title #sessionid]`.
+- **Live mode (zero-setup replies)** — once you message from Telegram, sessions hold briefly at each turn end (`HOLD_SECONDS`, default 10 min) and your replies are injected directly via the official Stop-hook `decision: block` mechanism. No bridge session, no daily setup. Typing anything locally instantly returns everything to normal desk behavior.
 - **Event types** — response finished (`✅`), still working in background (`🔄(N bg)`), waiting for input (`⏳`), multiple-choice question (`❓`), plan awaiting approval (`📋`).
 - **Reply routing** — swipe-reply to a notification to answer that exact session; plain messages go to the most recent one; `/sessions` and `/use` to switch targets.
 - **Self-healing** — the hook forwarder starts the daemon if it is down; single-instance guard; everything fails silent so your sessions are never blocked.
@@ -45,7 +46,7 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 3. Put both into `.env` (`BOT_TOKEN=...`, `TELEGRAM_OWNER_ID=...`).
 4. Restart the daemon (see table below).
 5. Send your bot one DM — that binds the chat. Only messages from `TELEGRAM_OWNER_ID` are accepted; everything else is silently dropped.
-6. To enable phone→PC replies, open any Claude Code session and run `/cc-telegram-bridge`. That session becomes the relay; leave it open. If it is closed, notifications keep flowing and replies queue until you reopen it.
+6. Replies work out of the box (live mode). The optional `/cc-telegram-bridge` relay session is only needed if you want **instant** delivery into sessions that have been idle for longer than the hold window — otherwise such messages are queued and injected automatically the next time that session wakes (you type in it, or it restarts).
 
 ## Daily driving
 
@@ -55,6 +56,8 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 | plain message | Goes to the most recently notified session |
 | `/sessions` | Numbered list of recent sessions (`*` = current target) |
 | `/use 2` or `/use a1b2` | Switch the current target |
+
+Delivery confirmations: `⚡ →` injected live (session was holding or mid-turn); `→ ... (session idle ...)` queued — delivered when that session next wakes, or instantly if the optional bridge session is running.
 
 ## Operating the daemon
 

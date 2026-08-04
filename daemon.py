@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -34,32 +35,18 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or ENV.get("BOT_TOKEN", "")
 OWNER_ID = int(ENV.get("TELEGRAM_OWNER_ID", "0") or "0")
 SECRET = ENV.get("BRIDGE_SECRET", "")
 PORT = int(ENV.get("PORT", "8765") or "8765")
+HOLD_SECONDS = int(ENV.get("HOLD_SECONDS", "600") or "600")
 IGNORE_CWD = [s.strip().lower() for s in ENV.get("IGNORE_CWD_SUBSTRINGS", "cc-telegram-bridge").split(",") if s.strip()]
 
 LOCK = threading.Lock()
 PENDING = {}
 LAST_SENT = {}
 GLOBAL_SENDS = []
+HOLDS = {}
+HOT_PENDING = {}
+SESS_STATE = {}
 CCD_SESSIONS_DIR = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"
 CCD_ID_CACHE = {}
-
-
-def resolve_ccd_id(cli_sid):
-    if cli_sid in CCD_ID_CACHE:
-        return CCD_ID_CACHE[cli_sid]
-    try:
-        for p in CCD_SESSIONS_DIR.rglob("local_*.json"):
-            try:
-                d = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if d.get("cliSessionId") == cli_sid:
-                ccd = d.get("sessionId") or p.stem
-                CCD_ID_CACHE[cli_sid] = ccd
-                return ccd
-    except Exception:
-        pass
-    return None
 
 
 def log(msg):
@@ -78,9 +65,13 @@ def log(msg):
 
 def load_state():
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        s = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return {"msg_map": {}, "recent": [], "last_session": None, "chat_id": None, "inbox_seq": 0, "dry_seq": 0}
+        s = {}
+    for k, v in (("msg_map", {}), ("recent", []), ("last_session", None), ("chat_id", None),
+                 ("inbox_seq", 0), ("dry_seq", 0), ("last_tg", 0), ("last_local", 0), ("pending", {})):
+        s.setdefault(k, v)
+    return s
 
 
 STATE = load_state()
@@ -90,6 +81,48 @@ def save_state():
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(STATE, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, STATE_PATH)
+
+
+def remote_active():
+    return STATE.get("last_tg", 0) > STATE.get("last_local", 0)
+
+
+def ccd_info(cli_sid):
+    c = CCD_ID_CACHE.get(cli_sid)
+    if c and c.get("path"):
+        try:
+            d = json.loads(Path(c["path"]).read_text(encoding="utf-8"))
+            return d.get("sessionId"), d.get("title")
+        except Exception:
+            pass
+    if c and not c.get("path") and time.time() - c.get("checked", 0) < 60:
+        return None, None
+    try:
+        for p in CCD_SESSIONS_DIR.rglob("local_*.json"):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if d.get("cliSessionId") == cli_sid:
+                CCD_ID_CACHE[cli_sid] = {"path": str(p), "checked": time.time()}
+                return d.get("sessionId"), d.get("title")
+    except Exception:
+        pass
+    CCD_ID_CACHE[cli_sid] = {"path": None, "checked": time.time()}
+    return None, None
+
+
+def resolve_ccd_id(cli_sid):
+    return ccd_info(cli_sid)[0]
+
+
+def session_label(sid, cwd):
+    title = None
+    try:
+        title = ccd_info(sid)[1]
+    except Exception:
+        pass
+    return title or (Path(cwd).name if cwd else "?")
 
 
 def telegram(method, payload):
@@ -153,6 +186,41 @@ def notify(sid, cwd, kind, text):
         PENDING[sid] = {"due": time.time() + 3, "kind": kind, "hash": h, "text": text, "cwd": cwd}
 
 
+def prune_pending_locked():
+    try:
+        cursor = int(CURSOR_PATH.read_text().strip() or "0") if CURSOR_PATH.exists() else 0
+    except Exception:
+        return
+    changed = False
+    for sid in list(STATE["pending"].keys()):
+        kept = [p for p in STATE["pending"][sid] if p.get("off", 0) >= cursor]
+        if len(kept) != len(STATE["pending"][sid]):
+            changed = True
+            if kept:
+                STATE["pending"][sid] = kept
+            else:
+                del STATE["pending"][sid]
+    if changed:
+        save_state()
+
+
+def pop_pending_locked(sid):
+    prune_pending_locked()
+    items = STATE["pending"].pop(sid, [])
+    if not items:
+        return ""
+    save_state()
+    texts = "\n".join("- " + p["text"] for p in items)
+    return ("[Telegram] The user sent the following message(s) from their phone while this session was idle. "
+            "Treat them as normal user messages and act on them:\n" + texts)
+
+
+def release_holds_locked():
+    for e in HOLDS.values():
+        e["deadline"] = 0
+        e["event"].set()
+
+
 def handle_event(data):
     try:
         with open(SPIKE / "hooklog.jsonl", "a", encoding="utf-8") as f:
@@ -164,12 +232,35 @@ def handle_event(data):
     cwd = data.get("cwd") or ""
     tp = data.get("transcript_path") or ""
     if not sid or not ev:
-        return
+        return {}
     if any(s in cwd.lower() for s in IGNORE_CWD):
-        return
+        return {}
+    if ev == "UserPromptSubmit":
+        with LOCK:
+            STATE["last_local"] = time.time()
+            SESS_STATE[sid] = "running"
+            release_holds_locked()
+            inject = pop_pending_locked(sid)
+            save_state()
+        return {"inject": inject}
+    if ev == "SessionStart":
+        with LOCK:
+            inject = pop_pending_locked(sid)
+        return {"inject": inject}
+    if ev == "Notification":
+        notify(sid, cwd, "notify", "⏳ " + (data.get("message") or "waiting for input"))
+        return {}
+    if ev == "PreToolUse":
+        tool = data.get("tool_name")
+        ti = data.get("tool_input") or {}
+        with LOCK:
+            SESS_STATE[sid] = "asking"
+        if tool == "AskUserQuestion":
+            notify(sid, cwd, "question", "❓ Question:\n" + format_questions(ti))
+        elif tool == "ExitPlanMode":
+            notify(sid, cwd, "plan", "📋 Plan awaiting approval:\n" + last_assistant_text(tp))
+        return {}
     if ev == "Stop":
-        if data.get("stop_hook_active"):
-            return
         text = (data.get("last_assistant_message") or "").strip()
         if text:
             text = text if len(text) <= 700 else "…" + text[-700:]
@@ -178,15 +269,42 @@ def handle_event(data):
         running_bg = [t for t in data.get("background_tasks") or [] if t.get("status") == "running"]
         icon = f"🔄({len(running_bg)} bg) " if running_bg else "✅ "
         notify(sid, cwd, "stop", icon + text)
-    elif ev == "Notification":
-        notify(sid, cwd, "notify", "⏳ " + (data.get("message") or "waiting for input"))
-    elif ev == "PreToolUse":
-        tool = data.get("tool_name")
-        ti = data.get("tool_input") or {}
-        if tool == "AskUserQuestion":
-            notify(sid, cwd, "question", "❓ Question:\n" + format_questions(ti))
-        elif tool == "ExitPlanMode":
-            notify(sid, cwd, "plan", "📋 Plan awaiting approval:\n" + last_assistant_text(tp))
+        hold = 0
+        with LOCK:
+            if remote_active():
+                hold = HOLD_SECONDS
+                entry = {"deadline": time.time() + hold, "event": threading.Event(), "reply": None}
+                hp = HOT_PENDING.pop(sid, None)
+                if hp:
+                    entry["reply"] = "\n".join(hp)
+                    entry["event"].set()
+                HOLDS[sid] = entry
+                SESS_STATE[sid] = "holding"
+            else:
+                SESS_STATE[sid] = "idle"
+        return {"hold": hold}
+    return {}
+
+
+def hold_wait(sid):
+    with LOCK:
+        entry = HOLDS.get(sid)
+    if not entry:
+        return {"keep": False}
+    entry["event"].wait(timeout=25)
+    with LOCK:
+        if entry.get("reply"):
+            text = entry["reply"]
+            entry["reply"] = None
+            HOLDS.pop(sid, None)
+            SESS_STATE[sid] = "running"
+            return {"reply": text}
+        if time.time() > entry["deadline"] or not remote_active():
+            HOLDS.pop(sid, None)
+            SESS_STATE[sid] = "idle"
+            return {"keep": False}
+        entry["event"].clear()
+    return {"keep": True}
 
 
 def update_recent(sid, cwd):
@@ -206,7 +324,7 @@ def record_sent(mid, sid, cwd, kind):
 
 
 def deliver(sid, item):
-    proj = Path(item["cwd"]).name if item["cwd"] else "?"
+    proj = session_label(sid, item["cwd"])
     body = (f"[{proj} #{sid[:8]}]\n" + item["text"])[:3900]
     payload = {"text": body}
     with LOCK:
@@ -279,7 +397,7 @@ def sessions_list():
         return "no notifications yet"
     lines = []
     for i, r in enumerate(rec, 1):
-        proj = Path(r["cwd"]).name if r.get("cwd") else "?"
+        proj = session_label(r["session_id"], r.get("cwd", ""))
         mark = " *" if r["session_id"] == last else ""
         lines.append(f"{i}. {proj} #{r['session_id'][:8]} — {humanize(r['ts'])}{mark}")
     return "\n".join(lines)
@@ -297,25 +415,38 @@ def reply_chat(text):
         return None
 
 
-def queue_inbox(session_id, cwd, text):
-    lag = 0
-    try:
-        cursor = int(CURSOR_PATH.read_text().strip() or "0") if CURSOR_PATH.exists() else 0
-        size = INBOX_PATH.stat().st_size if INBOX_PATH.exists() else 0
-        lag = size - cursor
-    except Exception:
-        pass
+def queue_cold(session_id, cwd, text):
+    deliver_id = resolve_ccd_id(session_id) or session_id
+    off = INBOX_PATH.stat().st_size if INBOX_PATH.exists() else 0
     with LOCK:
         STATE["inbox_seq"] = STATE.get("inbox_seq", 0) + 1
         seq = STATE["inbox_seq"]
+        STATE["pending"].setdefault(session_id, []).append({"text": text, "off": off})
         save_state()
-    deliver_id = resolve_ccd_id(session_id) or session_id
     with open(INBOX_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"id": seq, "ts": time.time(), "session_id": deliver_id, "cwd": cwd, "text": text}, ensure_ascii=False) + "\n")
-    proj = Path(cwd).name if cwd else "?"
-    conf = f"→ {proj} #{session_id[:8]}"
-    if lag > 0:
-        conf += "\n⚠️ bridge session looks behind — reply queued"
+        f.write(json.dumps({"id": seq, "ts": time.time(), "session_id": deliver_id, "cli_session_id": session_id, "cwd": cwd, "text": text}, ensure_ascii=False) + "\n")
+
+
+def route_reply(session_id, cwd, text):
+    proj = session_label(session_id, cwd)
+    with LOCK:
+        hold = HOLDS.get(session_id)
+        if hold and time.time() <= hold["deadline"]:
+            hold["reply"] = (hold["reply"] + "\n" + text) if hold.get("reply") else text
+            hold["event"].set()
+            mode = "live"
+        elif SESS_STATE.get(session_id) == "running" and remote_active():
+            HOT_PENDING.setdefault(session_id, []).append(text)
+            mode = "live-soon"
+        else:
+            mode = "cold"
+    if mode == "cold":
+        queue_cold(session_id, cwd, text)
+        conf = f"→ {proj} #{session_id[:8]} (session idle — delivered when it wakes, or via bridge)"
+    elif mode == "live-soon":
+        conf = f"⚡ → {proj} #{session_id[:8]} (delivered at end of current turn)"
+    else:
+        conf = f"⚡ → {proj} #{session_id[:8]}"
     r = reply_chat(conf)
     if r and r.get("ok"):
         with LOCK:
@@ -331,9 +462,10 @@ def handle_update(u):
         return
     chat_id = (msg.get("chat") or {}).get("id")
     with LOCK:
+        STATE["last_tg"] = time.time()
         if STATE.get("chat_id") != chat_id:
             STATE["chat_id"] = chat_id
-            save_state()
+        save_state()
     text = (msg.get("text") or "").strip()
     if not text:
         reply_chat("text messages only")
@@ -359,7 +491,7 @@ def handle_update(u):
         with LOCK:
             STATE["last_session"] = target["session_id"]
             save_state()
-        proj = Path(target["cwd"]).name if target.get("cwd") else "?"
+        proj = session_label(target["session_id"], target.get("cwd", ""))
         reply_chat(f"active: {proj} #{target['session_id'][:8]}")
         return
     target = None
@@ -378,7 +510,7 @@ def handle_update(u):
     if not target:
         reply_chat("no active session — reply to a notification or use /sessions")
         return
-    queue_inbox(target["session_id"], target["cwd"], text)
+    route_reply(target["session_id"], target["cwd"], text)
 
 
 def poll_loop():
@@ -404,14 +536,35 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def _json(self, obj, code=200):
+        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
-        if self.path == "/health":
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/health":
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
-        else:
-            self.send_response(404)
+            return
+        if SECRET and self.headers.get("X-Bridge-Token") != SECRET:
+            self.send_response(403)
             self.end_headers()
+            return
+        if parsed.path == "/hold":
+            sid = (urllib.parse.parse_qs(parsed.query).get("sid") or [""])[0]
+            try:
+                self._json(hold_wait(sid))
+            except Exception as e:
+                log(f"hold error: {e}")
+                self._json({"keep": False})
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_POST(self):
         if SECRET and self.headers.get("X-Bridge-Token") != SECRET:
@@ -423,22 +576,38 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(n)
         except Exception:
             body = b""
-        self.send_response(200)
-        self.end_headers()
         try:
             data = json.loads(body.decode("utf-8"))
         except Exception:
             data = {}
         if self.path == "/event":
             try:
-                handle_event(data)
+                resp = handle_event(data)
             except Exception as e:
                 log(f"event error: {e}")
-        elif self.path == "/deliver-status":
+                resp = {}
+            self._json(resp)
+            return
+        if self.path == "/deliver-status":
+            self._json({})
             reply_chat("⚠️ " + str(data.get("text") or "delivery status"))
-        elif self.path == "/shutdown":
+            return
+        if self.path == "/debug-inbound":
+            sid = data.get("sid") or ""
+            with LOCK:
+                STATE["last_tg"] = time.time()
+                save_state()
+            self._json({"ok": True})
+            if sid:
+                route_reply(sid, data.get("cwd") or "", data.get("text") or "")
+            return
+        if self.path == "/shutdown":
+            self._json({})
             log("shutdown requested")
             threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        self.send_response(404)
+        self.end_headers()
 
 
 class Server(ThreadingHTTPServer):
@@ -455,7 +624,7 @@ def main():
         return
     threading.Thread(target=poll_loop, daemon=True).start()
     threading.Thread(target=send_loop, daemon=True).start()
-    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'}")
+    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'} hold={HOLD_SECONDS}s")
     server.serve_forever()
 
 
