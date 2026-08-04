@@ -1,0 +1,48 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste your `.env`, bot token, `BRIDGE_SECRET`, or Telegram user id.** Redact them from any log you attach. If the issue *is* a security weakness, stop here and use [private reporting](https://github.com/ozaneski13/cc-telegram-bridge/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sent "..." from Telegram
+        2. Waited for the notification
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which side were you on?
+      options:
+        - At the PC (grace period active)
+        - On the phone (live mode)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon log
+      description: The last lines of `logs/daemon.log` around the failure, redacted.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "Windows 11 26200 · Claude Code 2.1.211 · bridge v0.3.0 (or commit sha)"
+    validations:
+      required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ozaneski13/cc-telegram-bridge/security/advisories/new
+    about: Private disclosure — please do not open a public issue for a vulnerability.
+  - name: Setup help
+    url: https://github.com/ozaneski13/cc-telegram-bridge#setup--step-by-step
+    about: The step-by-step setup, including the one-time Claude app restart.

@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation you are in, not the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      description: See CONTRIBUTING.md — these keep the tool auditable and safe to run.
+      options:
+        - label: This can be done with the Python standard library only
+        - label: This does not require a new outbound network destination
+        - label: I checked `spike/SPIKES.md` for whether this was already measured as impossible
