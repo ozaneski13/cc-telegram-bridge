@@ -1,0 +1,11 @@
+.env
+state.json
+inbox.jsonl
+inbox.cursor
+logs/
+spike/
+dist/
+build/
+*.spec
+*.exe
+__pycache__/

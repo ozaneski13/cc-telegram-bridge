@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "cc-telegram-bridge",
+  "version": "0.2.0",
+  "description": "CCD sessions <-> Telegram two-way bridge: hook notifications + reply relay",
+  "author": {
+    "name": "Ozan Eşki",
+    "email": "34617144+ozaneski13@users.noreply.github.com"
+  },
+  "skills": [
+    "./"
+  ]
+}
