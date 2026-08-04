@@ -103,7 +103,9 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 
 **Scope rules.** `/model` and `/effort` change one chat. Name it inline — `/model fable #a1b2c3d4`, `/model fable 6` (the number from `/sessions`), or by title — or omit it to use the current target chat. Add `global` — `/model fable global` — to change the default for **new** chats instead. `/fast` is global only.
 
-A per-chat change is stored in that chat's saved state, so it applies the next time the chat is opened. The desktop app rewrites its own state for the chat you are actively using, so a chat that is open right now will overwrite the change — close it first, or use `global`. Switching the model of the chat you are typing in is not possible remotely; use the model picker in the app.
+A per-chat change is stored in that chat's saved state, so it applies the next time the chat is opened. The desktop app rewrites its own state for the chat you are actively using, so a chat that is open right now will overwrite the change — close it first, or use `global`.
+
+**There is no way to switch a running chat's model instantly from here.** Writing its state is overwritten by the app, and injected messages reach the session as plain text without going through the client's slash-command handling, so `/model` cannot be triggered remotely. To steer a live session from your phone, use Anthropic's own Remote Control (claude.ai/code or the Claude mobile app).
 
 `/usage` reads your plan limits with the login already stored on your machine — nothing extra to configure.
 

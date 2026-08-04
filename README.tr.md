@@ -100,7 +100,9 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 
 **Kapsam kuralı.** `/model` ve `/effort` tek bir chat'i değiştirir. Chat'i satır içinde belirt — `/model fable #a1b2c3d4`, `/model fable 6` (`/sessions`'daki numara) veya başlığıyla — ya da hiç yazma, aktif hedef chat kullanılır. Sonuna `global` eklersen — `/model fable global` — bunun yerine **yeni** chat'lerin varsayılanı değişir. `/fast` yalnızca globaldir.
 
-Chat bazlı değişiklik o chat'in kayıtlı durumuna yazılır, yani chat bir dahaki açılışında geçerli olur. Uygulama, aktif kullandığın chat'in durumunu her turda kendisi yeniden yazdığı için **şu an açık olan** bir chat değişikliği ezer — önce o chat'i kapat, ya da `global` kullan. Halihazırda içinde yazdığın chat'in modelini uzaktan değiştirmek mümkün değil; app'teki model seçiciyi kullan.
+Chat bazlı değişiklik o chat'in kayıtlı durumuna yazılır, yani chat bir dahaki açılışında geçerli olur. Uygulama, aktif kullandığın chat'in durumunu her turda kendisi yeniden yazdığı için **şu an açık olan** bir chat değişikliği ezer — önce o chat'i kapat, ya da `global` kullan.
+
+**Çalışan bir chat'in modelini buradan anlık değiştirmek mümkün değil.** Durum dosyasına yazılan değeri app eziyor; enjekte edilen mesajlar da session'a düz metin olarak ulaşıp istemcinin slash-komut işleyicisine girmediği için `/model` uzaktan tetiklenemiyor. Canlı bir session'ı telefondan yönetmek istiyorsan Anthropic'in kendi Remote Control'ünü kullan (claude.ai/code veya Claude mobil uygulaması).
 
 `/usage` makinendeki mevcut Claude oturumunu kullanır, ek kurulum gerekmez.
 
