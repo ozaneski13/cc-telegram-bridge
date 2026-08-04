@@ -5,6 +5,7 @@ Control your **Claude Code Desktop** sessions from Telegram.
 - When Claude finishes an answer, asks a question, or waits for you — you get a Telegram message.
 - You reply on your phone — your reply goes straight into the right session, and Claude keeps working.
 - When you are at your PC, nothing buzzes: notifications are held for a few minutes and cancelled if you react in the app.
+- Multiple-choice questions arrive as tappable buttons, and you can check your plan usage or switch model / effort / fast mode from the phone.
 
 Everything uses official Claude Code mechanisms (a plugin, hooks, and the desktop app's own tools). No patched binaries.
 
@@ -93,6 +94,14 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 | A plain message | Goes to the most recently notified session |
 | `/sessions` | Lists recent sessions, numbered (`*` = current target) |
 | `/use 2` or `/use a1b2` | Switches the target for plain messages |
+| `/usage` | Your plan limits: 5-hour and weekly windows with reset times |
+| `/status` | Current defaults, target chat, and usage in one message |
+| `/model opus\|sonnet\|fable\|haiku` | Sets the model (append `[1m]` for 1M context) |
+| `/effort low\|medium\|high\|xhigh` | Sets the reasoning effort |
+| `/fast on\|off` | Toggles fast mode |
+| `/help` | Command list |
+
+`/model`, `/effort` and `/fast` write your Claude Code settings, so they apply to **sessions started afterwards**. `/model` and `/effort` are additionally stamped on the current target chat, which takes effect the next time you open that chat. `/usage` reads your plan limits with the login already stored on your machine — nothing extra to configure.
 
 Delivery confirmations you get back: `⚡ →` delivered live · `→ ... (session idle)` queued for when the session wakes.
 
@@ -150,6 +159,7 @@ Restart the daemon after changing `.env`.
 ## Security & privacy
 
 - The daemon listens on **127.0.0.1 only**; hook calls are authenticated with a shared secret.
+- `/usage` reads the OAuth token Claude Code already stores locally and sends it only to Anthropic's own API. `/model`, `/effort` and `/fast` edit only those three keys in `~/.claude/settings.json`, keep a `.bridge-bak` copy, and validate the file before replacing it.
 - Only your Telegram id is accepted — there is nothing a stranger can do by finding your bot.
 - Your bot token lives only in your local `.env` (gitignored). No secrets are stored anywhere else.
 - **Summaries of Claude's answers travel through Telegram's servers.** For sensitive projects, add the folder name to `IGNORE_CWD_SUBSTRINGS`.

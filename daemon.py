@@ -52,6 +52,12 @@ ASKS = {}
 ASK_SEQ = [0]
 CCD_SESSIONS_DIR = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"
 CCD_ID_CACHE = {}
+HOME = Path(os.environ.get("USERPROFILE") or Path.home())
+SETTINGS_PATH = HOME / ".claude" / "settings.json"
+CREDS_PATH = HOME / ".claude" / ".credentials.json"
+MODEL_IDS = {"opus": "claude-opus-5", "sonnet": "claude-sonnet-5", "fable": "claude-fable-5",
+             "haiku": "claude-haiku-4-5-20251001"}
+EFFORTS = ("low", "medium", "high", "xhigh")
 
 
 def log(msg):
@@ -183,6 +189,174 @@ def format_questions(tool_input):
             desc = (opt.get("description") or "")[:80]
             parts.append(f"  {i}. {opt.get('label', '?')}" + (f" — {desc}" if desc else ""))
     return "\n".join(parts) or "(question unreadable)"
+
+
+def read_settings():
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def write_settings(d):
+    try:
+        text = json.dumps(d, indent=2, ensure_ascii=False)
+        json.loads(text)
+        SETTINGS_PATH.with_suffix(".json.bridge-bak").write_text(SETTINGS_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+        tmp = SETTINGS_PATH.with_suffix(".json.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, SETTINGS_PATH)
+        return True
+    except Exception as e:
+        log(f"settings write failed: {e}")
+        return False
+
+
+def session_file(cli_sid):
+    ccd_info(cli_sid)
+    c = CCD_ID_CACHE.get(cli_sid) or {}
+    return Path(c["path"]) if c.get("path") else None
+
+
+def patch_session(cli_sid, field, value):
+    p = session_file(cli_sid)
+    if not p or not p.exists():
+        return False
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        d[field] = value
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, p)
+        return True
+    except Exception as e:
+        log(f"session patch failed: {e}")
+        return False
+
+
+def bar(pct):
+    filled = max(0, min(10, round(pct / 10)))
+    return "█" * filled + "░" * (10 - filled)
+
+
+def local_time(iso):
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(iso).astimezone().strftime("%a %H:%M")
+    except Exception:
+        return "?"
+
+
+def usage_text():
+    try:
+        tok = json.loads(CREDS_PATH.read_text(encoding="utf-8"))["claudeAiOauth"]["accessToken"]
+    except Exception:
+        return "usage unavailable — could not read local Claude credentials"
+    req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage",
+                                 headers={"Authorization": f"Bearer {tok}", "anthropic-beta": "oauth-2025-04-20"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception as e:
+        return f"usage unavailable ({type(e).__name__}) — open Claude Code once to refresh the login"
+    lines = ["📊 Usage"]
+    names = {"session": "5-hour", "weekly_all": "week (all)", "weekly_scoped": "week"}
+    for lim in d.get("limits") or []:
+        name = names.get(lim.get("kind"), lim.get("kind", "?"))
+        scope = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
+        if scope:
+            name = f"week ({scope})"
+        pct = int(lim.get("percent") or 0)
+        flag = " ⚠️" if (lim.get("severity") or "") in ("warning", "critical") else ""
+        lines.append(f"{name}: {bar(pct)} {pct}% · resets {local_time(lim.get('resets_at') or '')}{flag}")
+    ex = d.get("extra_usage") or {}
+    if ex.get("is_enabled"):
+        lines.append(f"extra credits: {ex.get('utilization', 0):.0f}% of {ex.get('monthly_limit')}")
+    return "\n".join(lines)
+
+
+def status_text():
+    s = read_settings() or {}
+    with LOCK:
+        last = STATE.get("last_session")
+        rec = {r["session_id"]: r for r in STATE.get("recent", [])}
+    target = "none"
+    if last:
+        target = f"{session_label(last, rec.get(last, {}).get('cwd', ''))} #{last[:8]}"
+    return ("⚙️ Defaults for new sessions\n"
+            f"model: {s.get('model', 'default')}\n"
+            f"effort: {s.get('effortLevel', 'default')}\n"
+            f"fast mode: {'on' if s.get('fastMode') else 'off'}\n"
+            f"target chat: {target}\n\n" + usage_text())
+
+
+def set_model(arg):
+    s = read_settings()
+    if s is None:
+        return "settings.json unreadable"
+    cur = str(s.get("model") or "")
+    key = arg.strip().lower()
+    suffix = "[1m]" if cur.endswith("[1m]") and not key.endswith("[1m]") else ""
+    base = key[:-4] if key.endswith("[1m]") else key
+    if base not in MODEL_IDS:
+        return "usage: /model opus|sonnet|fable|haiku (add [1m] for 1M context)"
+    s["model"] = base + (("[1m]" if key.endswith("[1m]") else "") or suffix)
+    if not write_settings(s):
+        return "could not write settings"
+    msg = f"model → {s['model']} (new sessions)"
+    with LOCK:
+        last = STATE.get("last_session")
+    if last and patch_session(last, "model", MODEL_IDS[base]):
+        msg += f"\nalso set on #{last[:8]} — takes effect when you reopen that chat"
+    return msg
+
+
+def set_effort(arg):
+    lvl = arg.strip().lower()
+    if lvl not in EFFORTS:
+        return "usage: /effort low|medium|high|xhigh"
+    s = read_settings()
+    if s is None:
+        return "settings.json unreadable"
+    s["effortLevel"] = lvl
+    if not write_settings(s):
+        return "could not write settings"
+    msg = f"effort → {lvl} (new sessions)"
+    with LOCK:
+        last = STATE.get("last_session")
+    if last and patch_session(last, "effort", lvl):
+        msg += f"\nalso set on #{last[:8]} — takes effect when you reopen that chat"
+    return msg
+
+
+def set_fast(arg):
+    s = read_settings()
+    if s is None:
+        return "settings.json unreadable"
+    a = arg.strip().lower()
+    if a in ("on", "1", "true"):
+        val = True
+    elif a in ("off", "0", "false"):
+        val = False
+    elif a == "":
+        val = not bool(s.get("fastMode"))
+    else:
+        return "usage: /fast on|off"
+    s["fastMode"] = val
+    if not write_settings(s):
+        return "could not write settings"
+    return f"fast mode → {'on' if val else 'off'} (new sessions)"
+
+
+HELP_TEXT = ("Commands\n"
+             "/usage — plan limits\n"
+             "/status — defaults + target chat + usage\n"
+             "/sessions — recent chats\n"
+             "/use N — switch target chat\n"
+             "/model opus|sonnet|fable|haiku\n"
+             "/effort low|medium|high|xhigh\n"
+             "/fast on|off\n\n"
+             "Reply to a notification to answer that chat; a plain message goes to the target chat.")
 
 
 def ask_keyboard(cid, qidx, q, selected):
@@ -652,11 +826,30 @@ def handle_update(u):
         return
     if ask_take_text(text):
         return
-    if text.split()[0] == "/sessions":
+    cmd = text.split()[0].lower()
+    arg = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+    if cmd in ("/help", "/start"):
+        reply_chat(HELP_TEXT)
+        return
+    if cmd == "/usage":
+        reply_chat(usage_text())
+        return
+    if cmd == "/status":
+        reply_chat(status_text())
+        return
+    if cmd == "/model":
+        reply_chat(set_model(arg) if arg else "usage: /model opus|sonnet|fable|haiku")
+        return
+    if cmd == "/effort":
+        reply_chat(set_effort(arg) if arg else "usage: /effort low|medium|high|xhigh")
+        return
+    if cmd == "/fast":
+        reply_chat(set_fast(arg))
+        return
+    if cmd == "/sessions":
         reply_chat(sessions_list())
         return
-    if text.split()[0] == "/use":
-        arg = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
+    if cmd == "/use":
         with LOCK:
             rec = list(STATE.get("recent", []))
         target = None

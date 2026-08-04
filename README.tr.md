@@ -91,6 +91,14 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 | Düz mesaj | En son bildirim atan session'a gider |
 | `/sessions` | Son session'ları numaralı listeler (`*` = aktif hedef) |
 | `/use 2` veya `/use a1b2` | Düz mesajların hedefini değiştirir |
+| `/usage` | Plan limitlerin: 5 saatlik ve haftalık pencereler + sıfırlanma saatleri |
+| `/status` | Mevcut varsayılanlar + hedef chat + kullanım, tek mesajda |
+| `/model opus\|sonnet\|fable\|haiku` | Modeli değiştirir (1M context için sonuna `[1m]`) |
+| `/effort low\|medium\|high\|xhigh` | Düşünme eforunu değiştirir |
+| `/fast on\|off` | Fast mode açar/kapatır |
+| `/help` | Komut listesi |
+
+`/model`, `/effort` ve `/fast` Claude Code ayarlarını yazar; yani **bundan sonra açılan session'lara** uygulanır. `/model` ve `/effort` ayrıca aktif hedef chat'e de işlenir — o chat'i yeniden açtığında geçerli olur. `/usage` makinendeki mevcut Claude oturumunu kullanır, ek kurulum gerekmez.
 
 Dönen onaylar: `⚡ →` canlı iletildi · `→ ... (session idle)` kuyruklandı, session uyanınca iletilecek.
 
