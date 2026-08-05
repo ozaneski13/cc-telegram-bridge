@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
+            "command": "__PYTHON__",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.py"],
             "timeout": 900
           }
         ]
@@ -16,7 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
+            "command": "__PYTHON__",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.py"],
             "timeout": 10
           }
         ]
@@ -27,7 +29,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
+            "command": "__PYTHON__",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.py"],
             "timeout": 15
           }
         ]
@@ -38,7 +41,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
+            "command": "__PYTHON__",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.py"],
             "timeout": 15
           }
         ]
@@ -50,7 +54,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.exe\"",
+            "command": "__PYTHON__",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notify_event.py"],
             "timeout": 400
           }
         ]

@@ -14,7 +14,7 @@ For anything that is not a vulnerability — a bug, a question, an idea — a no
 
 ## Supported versions
 
-Only the current `main` branch is supported. There are no maintained release branches; fixes land on `main` and are picked up the next time you `git pull` and re-run `build.ps1` + `setup.ps1`.
+Only the current `main` branch is supported. There are no maintained release branches; fixes land on `main` and are picked up the next time you `git pull` and re-run `setup.ps1`.
 
 ## Scope
 
@@ -22,7 +22,7 @@ Only the current `main` branch is supported. There are no maintained release bra
 
 - `daemon.py` — the local HTTP endpoint, Telegram polling, command handling, and the files it writes
 - `plugin/hooks/notify_event.py` and `plugin/hooks/hooks.json` — the hook forwarder that runs inside your Claude Code sessions
-- `setup.ps1`, `build.ps1` — installation and build
+- `setup.ps1` — installation, plugin generation, autostart
 
 Examples of what is worth reporting: a way for someone other than the configured Telegram user to reach a session; command or path injection through a message; the shared secret or bot token leaking into a log, a repository file, or a network request; the settings writer corrupting or over-writing more than the documented keys.
 

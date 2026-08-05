@@ -33,7 +33,7 @@ Notification icons: `✅` answer finished · `🔄(N bg)` still working in backg
 - Windows 10/11
 - [Claude Code Desktop](https://claude.com/claude-code), logged in
 - A Telegram account
-- Python 3.10+ (used once, to build the two executables)
+- Python 3.10+ on `PATH` — the daemon and the hook run straight from the `.py` sources; nothing is compiled or packed
 
 ---
 
@@ -47,7 +47,7 @@ cd cc-telegram-bridge
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-`setup.ps1` does everything local: builds the executables (first run only), installs the Claude Code plugin, sets up autostart, and starts the background daemon. You can re-run it any time; it is safe.
+`setup.ps1` does everything local: finds your Python, installs the Claude Code plugin (writing your interpreter's path into its hook config), sets up autostart, and starts the background daemon with `pythonw`. You can re-run it any time; it is safe.
 
 **2. Create your Telegram bot:**
 
@@ -72,9 +72,10 @@ This file stays on your machine only — it is gitignored and never leaves your 
 **5. Restart the daemon** so it picks up the token:
 
 ```powershell
-taskkill /IM cc-telegram-bridge.exe /F
-.\cc-telegram-bridge.exe
+powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
+
+(`setup.ps1` restarts it for you. To do it by hand: end the `pythonw` process, then `pythonw daemon.py`.)
 
 **6. Send your bot one DM** (anything, e.g. "hi"). This binds the chat. Only messages from your id are accepted; everyone else is silently ignored.
 
@@ -130,8 +131,8 @@ If it's closed, nothing breaks — queued messages are still delivered when the 
 |---|---|
 | Is it running? | `curl.exe http://127.0.0.1:8765/health` → `ok` |
 | Stop | `curl.exe -X POST http://127.0.0.1:8765/shutdown -H "X-Bridge-Token: <BRIDGE_SECRET from .env>"` |
-| Start | run `cc-telegram-bridge.exe` (or just use Claude — hooks auto-start it) |
-| Rebuild after code changes | `powershell -ExecutionPolicy Bypass -File build.ps1` then re-run `setup.ps1` |
+| Start | `pythonw daemon.py` (or just use Claude — the hook starts it automatically) |
+| Apply code changes | re-run `setup.ps1` (it restarts the daemon and re-installs the plugin) |
 | Disable the plugin | `claude plugin disable cc-telegram-bridge@skills-dir` |
 
 ---
@@ -156,7 +157,7 @@ Restart the daemon after changing `.env`.
 
 ## Moving to another PC (same Claude account)
 
-1. On the **old** PC: `taskkill /IM cc-telegram-bridge.exe /F` and delete `shell:startup\cc-telegram-bridge.lnk`. (Two PCs polling one bot token conflict and cause duplicate notifications.)
+1. On the **old** PC: stop the daemon (the shutdown command above, or end its `pythonw` process) and delete `shell:startup\cc-telegram-bridge.lnk`. (Two PCs polling one bot token conflict and cause duplicate notifications.)
 2. Copy the project folder to the new PC — or `git clone` it and copy just your `.env` (and optionally `state.json`, which keeps the chat binding).
 3. On the **new** PC run `setup.ps1`, then restart the Claude app once. Done — nothing is tied to a username or folder location.
 
@@ -178,7 +179,7 @@ grep -nE "open\(.*['\"]w|write_text|os.replace" daemon.py                     # 
 What those commands show, and what it means:
 
 - **No dependencies.** Python standard library only — nothing is pulled from PyPI at runtime, so there is no supply chain to trust. About 1,300 lines total, small enough to read end to end.
-- **No binaries in this repo.** You compile the two executables yourself from the sources you just read.
+- **No binaries anywhere.** Nothing is compiled or packed: your Python interpreter runs the `.py` files you just read, so what executes is exactly what you can audit. (This is also why Windows Defender is happy — see [Troubleshooting](#troubleshooting).)
 - **Three network destinations, ever:** `127.0.0.1` (hooks → daemon), `api.telegram.org` (your bot), and `api.anthropic.com/api/oauth/usage` (only for `/usage`). No telemetry, no analytics, no third-party endpoint.
 - **It never executes anything you send.** The only process it ever launches is its own daemon executable — no shell, no `eval`, no command built from a message. Telegram text is carried as text.
 - **It writes to a fixed set of paths:** its own folder (state, queue, logs), the `model`/`effort` field of a named chat's saved state, and — only for `global`/`/fast` — the `model`, `effortLevel` and `fastMode` keys of `~/.claude/settings.json`, backed up to `.bridge-bak` and validated before replacing. Any other value is rejected.
@@ -197,6 +198,14 @@ What those commands show, and what it means:
 - If a question still opens in the app after you tap a button, set `ASK_ANSWER_MODE=deny` and restart the daemon.
 - Reply injection needs Claude Code Desktop. Notifications alone work with anything that runs Claude Code hooks.
 - Windows-only as shipped (PowerShell scripts, Startup shortcut); the daemon itself is portable Python.
+
+## Troubleshooting
+
+**Windows Defender flagged the bridge.** Earlier versions shipped a PyInstaller-packed `.exe`, and Defender's machine-learning heuristics scored it as a trojan: a self-installing single-file binary that opens a socket, polls a remote server, and launches processes looks exactly like a remote-access tool from the outside. It was a false positive on our own build — but rather than ask you to add an antivirus exclusion, the packing was removed entirely. The daemon and the hook now run as plain `.py` files under your own Python interpreter, which is signed and trusted, so there is nothing for the heuristic to score. If you are upgrading from a version that had `cc-telegram-bridge.exe`, delete it, delete `Startup\cc-telegram-bridge.lnk`, and run `setup.ps1` again.
+
+**Notifications stopped after an update.** Plugins load when a session starts. Restart the Claude Code Desktop app once so every open chat picks up the current hooks.
+
+**A chat never notifies.** Check that its folder name is not matched by `IGNORE_CWD_SUBSTRINGS`, then confirm the daemon is up with the health check above.
 
 ## Security
 

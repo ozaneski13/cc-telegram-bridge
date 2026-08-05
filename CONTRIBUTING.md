@@ -10,20 +10,20 @@ Open an issue first if the change is substantial. Some constraints below are loa
 
 These are deliberate, and a change that breaks one will be sent back:
 
-- **Standard library only.** No PyPI dependencies at runtime — this is what makes the tool auditable in a minute. PyInstaller is a build-time tool and stays out of the runtime path.
+- **Standard library only.** No PyPI dependencies at runtime — this is what makes the tool auditable in a minute.
+- **Nothing gets packed into a binary.** An earlier version shipped a PyInstaller executable and Windows Defender's heuristics scored it as a trojan; running the `.py` files under the user's own interpreter removed the problem and made the running code identical to the reviewable code. Keep it that way.
 - **Hooks must fail silent and fast.** `plugin/hooks/notify_event.py` runs inside every Claude Code session. If the daemon is down, unreachable, or wrong, the hook must swallow the error and exit 0. A hook that raises, hangs, or prints stray output breaks the user's session — the one thing this project must never do.
-- **No executables in the repository.** Users build them locally; that is a security property, not an oversight.
+- **No executables in the repository**, and none produced at install time either.
 - **No new outbound destinations** beyond `127.0.0.1`, the Telegram bot API, and Anthropic's usage endpoint, unless the pull request explains why and the README's security section is updated in the same change.
 - **Writes stay bounded.** The daemon writes its own folder, the model/effort fields of a named chat's saved state, and three documented keys in `~/.claude/settings.json`. New write targets need to be documented and validated the same way.
 
 ## Build and run
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1   # compile both executables
-powershell -ExecutionPolicy Bypass -File setup.ps1   # install plugin, autostart, start daemon
+powershell -ExecutionPolicy Bypass -File setup.ps1   # install plugin, autostart, (re)start daemon
 ```
 
-For a faster loop, run the daemon straight from source instead of rebuilding: stop the executable, then `python daemon.py` in the project folder.
+`setup.ps1` writes your interpreter's path into the plugin's `hooks.json` from `hooks.json.template`, so edit the template rather than the generated file. For a faster loop while working on the daemon, stop it and run `python daemon.py` in the project folder to watch its log on the console.
 
 ## Testing
 

@@ -43,6 +43,6 @@ body:
     id: versions
     attributes:
       label: Versions
-      placeholder: "Windows 11 26200 · Claude Code 2.1.211 · bridge v0.3.0 (or commit sha)"
+      placeholder: "Windows 11 26200 · Claude Code 2.1.211 · Python 3.10.11 · bridge v0.4.0 (or commit sha)"
     validations:
       required: true

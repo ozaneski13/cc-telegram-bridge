@@ -53,10 +53,12 @@ def api(env, method, path, payload=None, timeout=4):
 
 
 def start_daemon():
-    exe = APP_HOME / "cc-telegram-bridge.exe"
-    if not exe.exists():
+    script = APP_HOME / "daemon.py"
+    if not script.exists():
         return False
-    subprocess.Popen([str(exe)], cwd=str(APP_HOME), creationflags=0x00000208, close_fds=True)
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    exe = pyw if pyw.exists() else Path(sys.executable)
+    subprocess.Popen([str(exe), str(script)], cwd=str(APP_HOME), creationflags=0x00000208, close_fds=True)
     return True
 
 

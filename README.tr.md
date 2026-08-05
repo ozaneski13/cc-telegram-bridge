@@ -30,7 +30,7 @@ Bildirim ikonları: `✅` cevap bitti · `🔄(N bg)` arka planda iş sürüyor 
 - Windows 10/11
 - [Claude Code Desktop](https://claude.com/claude-code) (giriş yapılmış)
 - Telegram hesabı
-- Python 3.10+ (yalnızca bir kez, exe'leri derlemek için)
+- `PATH`'te Python 3.10+ — daemon da hook da doğrudan `.py` kaynağından çalışır; hiçbir şey derlenmez/paketlenmez
 
 ---
 
@@ -44,7 +44,7 @@ cd cc-telegram-bridge
 powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
-`setup.ps1` her şeyi yapar: exe'leri derler (ilk seferde), Claude Code plugin'ini kurar, autostart'ı ayarlar, arka plan daemon'ını başlatır. İstediğin zaman tekrar çalıştırabilirsin, güvenlidir.
+`setup.ps1` her şeyi yapar: Python'unu bulur, Claude Code plugin'ini kurar (yorumlayıcının yolunu hook ayarına yazarak), autostart'ı ayarlar, daemon'ı `pythonw` ile başlatır. İstediğin zaman tekrar çalıştırabilirsin, güvenlidir.
 
 **2. Telegram botunu oluştur:**
 
@@ -69,8 +69,7 @@ Bu dosya sadece senin makinende kalır — gitignore'dadır, hiçbir yere gitmez
 **5. Daemon'ı yeniden başlat** (token'ı okusun):
 
 ```powershell
-taskkill /IM cc-telegram-bridge.exe /F
-.\cc-telegram-bridge.exe
+powershell -ExecutionPolicy Bypass -File setup.ps1
 ```
 
 **6. Botuna bir DM at** ("selam" yeterli). Chat böyle bağlanır. Sadece senin id'inden gelen mesajlar kabul edilir; başka herkes sessizce yok sayılır.
@@ -127,8 +126,8 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 |---|---|
 | Çalışıyor mu? | `curl.exe http://127.0.0.1:8765/health` → `ok` |
 | Durdur | `curl.exe -X POST http://127.0.0.1:8765/shutdown -H "X-Bridge-Token: <.env'deki BRIDGE_SECRET>"` |
-| Başlat | `cc-telegram-bridge.exe` (ya da hiçbir şey yapma — hook'lar kendisi başlatır) |
-| Kod değişince derle | `powershell -ExecutionPolicy Bypass -File build.ps1` sonra `setup.ps1` |
+| Başlat | `pythonw daemon.py` (ya da hiçbir şey yapma — hook kendisi başlatır) |
+| Kod değişince | `setup.ps1`'i tekrar çalıştır (daemon'ı yeniden başlatır, plugin'i yeniden kurar) |
 | Plugin'i kapat | `claude plugin disable cc-telegram-bridge@skills-dir` |
 
 ---
@@ -153,7 +152,7 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 
 ## Başka PC'ye taşıma (aynı Claude hesabı)
 
-1. **Eski** PC'de: `taskkill /IM cc-telegram-bridge.exe /F` + `shell:startup` içindeki `cc-telegram-bridge.lnk`'i sil. (İki PC aynı token'ı dinlerse çakışma ve çift bildirim olur.)
+1. **Eski** PC'de: daemon'ı durdur (yukarıdaki shutdown komutu veya `pythonw` sürecini sonlandır) + `shell:startup` içindeki `cc-telegram-bridge.lnk`'i sil. (İki PC aynı token'ı dinlerse çakışma ve çift bildirim olur.)
 2. Proje klasörünü yeni PC'ye kopyala — veya `git clone` yapıp sadece `.env`'ini taşı (`state.json`'ı da taşırsan chat bağı korunur).
 3. **Yeni** PC'de `setup.ps1` çalıştır, Claude uygulamasını bir kez yeniden başlat. Bitti — kullanıcı adına veya klasör konumuna bağlı hiçbir şey yok.
 
@@ -175,9 +174,9 @@ grep -nE "open\(.*['\"]w|write_text|os.replace" daemon.py                     # 
 Bu komutların gösterdiği ve anlamı:
 
 - **Sıfır bağımlılık.** Yalnızca Python standart kütüphanesi — çalışma anında PyPI'dan hiçbir şey çekilmiyor, yani güvenmen gereken bir tedarik zinciri yok. Toplam ~1.300 satır; baştan sona okunabilecek kadar küçük.
-- **Repoda binary yok.** İki exe'yi de az önce okuduğun kaynaktan kendin derliyorsun.
+- **Hiçbir yerde binary yok.** Hiçbir şey derlenmiyor/paketlenmiyor: az önce okuduğun `.py` dosyalarını kendi Python yorumlayıcın çalıştırıyor, yani çalışan şey birebir denetleyebildiğin şey. (Windows Defender'ın memnun olmasının sebebi de bu — bkz. [Sorun giderme](#sorun-giderme).)
 - **Toplam üç dış adres:** `127.0.0.1` (hook → daemon), `api.telegram.org` (kendi botun) ve `api.anthropic.com/api/oauth/usage` (yalnızca `/usage` için). Telemetri, analitik, üçüncü taraf uç noktası yok.
-- **Gönderdiğin hiçbir şeyi çalıştırmıyor.** Başlattığı tek süreç kendi daemon exe'si — shell yok, `eval` yok, mesajdan komut üretimi yok. Telegram metni metin olarak taşınıyor.
+- **Gönderdiğin hiçbir şeyi çalıştırmıyor.** Başlattığı tek süreç kendi daemon'ı (`pythonw daemon.py`) — shell yok, `eval` yok, mesajdan komut üretimi yok. Telegram metni metin olarak taşınıyor.
 - **Sabit bir dosya kümesine yazıyor:** kendi klasörü (durum, kuyruk, log), hedeflenen sohbetin `model`/`effort` alanı ve — yalnızca `global`/`/fast` ile — `~/.claude/settings.json` içindeki `model`, `effortLevel`, `fastMode` anahtarları (`.bridge-bak` yedeği alınarak ve dosya doğrulanarak). Geçersiz değer reddediliyor.
 - **Sadece senin numeric Telegram id'in kabul ediliyor;** gerisi sessizce düşüyor, yani botunu bulan yabancının eline hiçbir şey geçmiyor. Lokal HTTP ucu yalnızca loopback dinliyor ve ortak sır istiyor.
 - **Bot token'ın `.env`'den hiç çıkmıyor** (gitignore'da). Daemon başka bir kimlik bilgisi tutmuyor; `/usage`, Claude Code'un makinende zaten sakladığı OAuth token'ını okuyup yalnızca Anthropic'e gönderiyor.
@@ -194,6 +193,14 @@ Bu komutların gösterdiği ve anlamı:
 - Butona bastığın halde soru app'te yine açılıyorsa `.env`'de `ASK_ANSWER_MODE=deny` yapıp daemon'ı yeniden başlat.
 - Cevap enjeksiyonu Claude Code Desktop gerektirir; yalnız-bildirim tarafı hook çalıştıran her Claude Code'da işler.
 - Şu haliyle Windows-only (PowerShell script'leri, Startup kısayolu); daemon'ın kendisi taşınabilir Python.
+
+## Sorun giderme
+
+**Windows Defender köprüyü işaretledi.** Önceki sürümler PyInstaller ile paketlenmiş bir `.exe` içeriyordu ve Defender'ın makine öğrenmesi sezgiseli bunu trojan olarak puanladı: kendini kuran, soket açan, uzak sunucu yoklayan ve süreç başlatan tek dosyalık bir binary dışarıdan bakınca birebir uzaktan erişim aracına benziyor. Bu, kendi derlememiz üzerinde bir false positive'di — ama senden antivirüs istisnası eklemeni istemek yerine paketlemeyi tamamen kaldırdık. Daemon ve hook artık düz `.py` dosyaları olarak, imzalı ve güvenilen kendi Python yorumlayıcın altında çalışıyor; sezgiselin puanlayacağı bir şey kalmıyor. `cc-telegram-bridge.exe` içeren bir sürümden geliyorsan: o dosyayı ve `Startup\cc-telegram-bridge.lnk`'i sil, `setup.ps1`'i tekrar çalıştır.
+
+**Güncellemeden sonra bildirimler kesildi.** Plugin'ler session açılırken yüklenir. Claude Code Desktop'ı bir kez yeniden başlat ki açık her sohbet güncel hook'ları alsın.
+
+**Bir sohbet hiç bildirim atmıyor.** Klasör adının `IGNORE_CWD_SUBSTRINGS` ile eşleşmediğini kontrol et, sonra yukarıdaki health komutuyla daemon'ın ayakta olduğunu doğrula.
 
 ## Güvenlik bildirimi
 
