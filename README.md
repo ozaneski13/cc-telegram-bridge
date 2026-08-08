@@ -9,7 +9,7 @@ Control your **Claude Code Desktop** sessions from Telegram.
 
 Everything uses official Claude Code mechanisms (a plugin, hooks, and the desktop app's own tools). No patched binaries.
 
-*Türkçe dokümantasyon: [README.tr.md](README.tr.md)*
+*Türkçe dokümantasyon: [README.tr.md](README.tr.md) · Picking this up on a new machine? [docs/RESUME.md](docs/RESUME.md)*
 
 ---
 
