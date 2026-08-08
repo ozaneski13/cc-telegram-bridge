@@ -150,11 +150,22 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 
 ---
 
-## Başka PC'ye taşıma (aynı Claude hesabı)
+## Başka PC'ye taşıma / Windows'u yeniden kurma
 
-1. **Eski** PC'de: daemon'ı durdur (yukarıdaki shutdown komutu veya `pythonw` sürecini sonlandır) + `shell:startup` içindeki `cc-telegram-bridge.lnk`'i sil. (İki PC aynı token'ı dinlerse çakışma ve çift bildirim olur.)
-2. Proje klasörünü yeni PC'ye kopyala — veya `git clone` yapıp sadece `.env`'ini taşı (`state.json`'ı da taşırsan chat bağı korunur).
-3. **Yeni** PC'de `setup.ps1` çalıştır, Claude uygulamasını bir kez yeniden başlat. Bitti — kullanıcı adına veya klasör konumuna bağlı hiçbir şey yok.
+**Yedeklemen gereken tam olarak iki dosya** — gerisi ya bu repoda ya da `setup.ps1` tarafından yeniden üretiliyor:
+
+| Dosya | Neden | Kaybedersen |
+|---|---|---|
+| `.env` | bot token'ın, Telegram id'in, ortak sır | @BotFather'dan yeni bot alıp `.env`'i doldurursun; sır otomatik yeniden üretilir |
+| `state.json` *(opsiyonel)* | bağlı Telegram chat'i ve son hedefler | Hiçbir şey bozulmaz — bota bir DM at, yeniden bağlanır |
+
+Saklamaya değmez: `logs/`, `inbox.jsonl`, `inbox.cursor`, `spike/`. Botun kendisi Telegram sunucularında yaşar, formatı atlatır.
+
+**Yeni makinede:**
+
+1. **Eski** PC hâlâ duruyorsa: daemon'ı durdur (shutdown komutu veya `pythonw` sürecini sonlandır) + `shell:startup` içindeki `cc-telegram-bridge.lnk`'i sil. İki makine aynı token'ı yoklarsa çakışır ve çift bildirim gelir.
+2. Repoyu `git clone` et, `.env`'ini `daemon.py`'nin yanına koy.
+3. `setup.ps1` çalıştır, Claude Code Desktop'ı bir kez yeniden başlat. Kullanıcı adına veya klasör konumuna bağlı hiçbir şey yok.
 
 ---
 
@@ -201,6 +212,10 @@ Bu komutların gösterdiği ve anlamı:
 **Güncellemeden sonra bildirimler kesildi.** Plugin'ler session açılırken yüklenir. Claude Code Desktop'ı bir kez yeniden başlat ki açık her sohbet güncel hook'ları alsın.
 
 **Bir sohbet hiç bildirim atmıyor.** Klasör adının `IGNORE_CWD_SUBSTRINGS` ile eşleşmediğini kontrol et, sonra yukarıdaki health komutuyla daemon'ın ayakta olduğunu doğrula.
+
+## Platform notları
+
+[docs/platform-notes.md](docs/platform-notes.md), bu köprüyü inşa ederken Claude Code Desktop hakkında **ölçülen** şeyleri kaydediyor: hook/plugin yükleme farkı, iki ayrı session-id uzayı, iletilen mesajın ne olup ne olmadığı ve imkânsız çıkan birkaç yol. Köprüyü genişletmeden veya benzer bir şey yazmadan önce okumaya değer.
 
 ## Güvenlik bildirimi
 
