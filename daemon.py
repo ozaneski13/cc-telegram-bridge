@@ -30,6 +30,16 @@ def load_env():
     return env
 
 
+def parse_quiet(spec):
+    try:
+        a, b = [x.strip() for x in spec.split("-", 1)]
+        ah, am = (int(x) for x in a.split(":"))
+        bh, bm = (int(x) for x in b.split(":"))
+        return ah * 60 + am, bh * 60 + bm
+    except Exception:
+        return None
+
+
 ENV = load_env()
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or ENV.get("BOT_TOKEN", "")
 OWNER_ID = int(ENV.get("TELEGRAM_OWNER_ID", "0") or "0")
@@ -39,6 +49,9 @@ HOLD_SECONDS = int(ENV.get("HOLD_SECONDS", "600") or "600")
 NOTIFY_GRACE = int(ENV.get("NOTIFY_GRACE_SECONDS", "180") or "180")
 ASK_WAIT = int(ENV.get("ASK_WAIT_SECONDS", "300") or "300")
 ASK_MODE = (ENV.get("ASK_ANSWER_MODE", "input") or "input").strip().lower()
+QUIET = parse_quiet(ENV.get("QUIET_HOURS", ""))
+DEBUG_HOOKLOG = (ENV.get("DEBUG_HOOKLOG", "") or "").strip().lower() in ("1", "true", "yes", "on")
+LOG_MAX_BYTES = 1_000_000
 IGNORE_CWD = [s.strip().lower() for s in ENV.get("IGNORE_CWD_SUBSTRINGS", "cc-telegram-bridge").split(",") if s.strip()]
 
 LOCK = threading.Lock()
@@ -60,9 +73,18 @@ MODEL_IDS = {"opus": "claude-opus-5", "sonnet": "claude-sonnet-5", "fable": "cla
 EFFORTS = ("low", "medium", "high", "xhigh")
 
 
+def rotate(p, limit):
+    try:
+        if p.exists() and p.stat().st_size > limit:
+            os.replace(p, p.with_name(p.name + ".1"))
+    except Exception:
+        pass
+
+
 def log(msg):
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
     try:
+        rotate(LOGS / "daemon.log", LOG_MAX_BYTES)
         with open(LOGS / "daemon.log", "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
@@ -80,7 +102,8 @@ def load_state():
     except Exception:
         s = {}
     for k, v in (("msg_map", {}), ("recent", []), ("last_session", None), ("chat_id", None),
-                 ("inbox_seq", 0), ("dry_seq", 0), ("last_tg", 0), ("last_local", 0), ("pending", {})):
+                 ("inbox_seq", 0), ("dry_seq", 0), ("last_tg", 0), ("last_local", 0), ("pending", {}),
+                 ("mute_until", 0)):
         s.setdefault(k, v)
     return s
 
@@ -306,7 +329,19 @@ def status_text():
             f"model: {s.get('model', 'default')}\n"
             f"effort: {s.get('effortLevel', 'default')}\n"
             f"fast mode: {'on' if s.get('fastMode') else 'off'}\n"
-            f"target chat: {target}\n\n" + usage_text())
+            f"target chat: {target}\n"
+            f"notifications: {notifications_state()}\n\n" + usage_text())
+
+
+def notifications_state():
+    with LOCK:
+        mute_until = STATE.get("mute_until", 0)
+    spec = ENV.get("QUIET_HOURS", "")
+    if time.time() < mute_until:
+        return "muted until " + time.strftime("%H:%M", time.localtime(mute_until))
+    if in_quiet_hours():
+        return f"quiet hours ({spec})"
+    return "on" + (f" · quiet hours {spec}" if QUIET else "")
 
 
 def parse_target_arg(arg):
@@ -403,6 +438,38 @@ def set_fast(arg):
     return f"fast mode → {'on' if val else 'off'} (new sessions)"
 
 
+def parse_minutes(arg):
+    a = arg.strip().lower()
+    if not a:
+        return 60
+    unit = a[-1] if a[-1] in "mh" else "m"
+    num = a[:-1] if a[-1] in "mh" else a
+    if not num.isdigit() or int(num) <= 0:
+        return None
+    return int(num) * (60 if unit == "h" else 1)
+
+
+def set_mute(arg):
+    if arg.strip().lower() in ("off", "0"):
+        return unmute()
+    mins = parse_minutes(arg)
+    if mins is None:
+        return "usage: /mute [30m | 2h]  ·  /unmute"
+    with LOCK:
+        STATE["mute_until"] = time.time() + mins * 60
+        PENDING.clear()
+        save_state()
+        until = time.strftime("%H:%M", time.localtime(STATE["mute_until"]))
+    return f"🔕 muted until {until} — messaging the bot still works, and notifications resume while you chat"
+
+
+def unmute():
+    with LOCK:
+        STATE["mute_until"] = 0
+        save_state()
+    return "🔔 notifications on" + (" (quiet hours are active right now)" if in_quiet_hours() else "")
+
+
 HELP_TEXT = ("Commands\n"
              "/usage — plan limits\n"
              "/status — defaults + target chat + usage\n"
@@ -410,7 +477,8 @@ HELP_TEXT = ("Commands\n"
              "/use N — switch target chat\n"
              "/model fable #chatid — that chat (or N, or 'global' for new chats)\n"
              "/effort high #chatid — same targeting\n"
-             "/fast on|off\n\n"
+             "/fast on|off\n"
+             "/mute 2h · /unmute — pause notifications\n\n"
              "Reply to a notification to answer that chat; a plain message goes to the target chat.")
 
 
@@ -459,6 +527,7 @@ def ask_close(cid, note):
 
 def ask_cancel_for_session(sid, note):
     for cid in [c for c, a in ASKS.items() if a["sid"] == sid and not a["done"]]:
+        log(f"ask {cid} cancelled for #{sid[:8]} (local prompt)")
         a = ASKS[cid]
         a["done"] = True
         a["answers"] = None
@@ -556,6 +625,7 @@ def ask_start(sid, cwd, questions):
         ASKS[cid] = {"sid": sid, "label": session_label(sid, cwd), "questions": questions, "idx": 0,
                      "selected": set(), "answers": {}, "done": False, "await_text": False,
                      "event": threading.Event(), "deadline": time.time() + ASK_WAIT, "msg_id": None}
+        log(f"ask {cid} started for #{sid[:8]} ({len(questions)} question(s))")
         ask_send(cid)
     return {"cid": cid, "wait": ASK_WAIT, "mode": ASK_MODE}
 
@@ -569,18 +639,38 @@ def ask_poll(cid):
     with LOCK:
         if a["done"]:
             ASKS.pop(cid, None)
-            return {"answers": a["answers"]} if a["answers"] else {"keep": False}
+            if a["answers"]:
+                log(f"ask {cid} answered from telegram for #{a['sid'][:8]}, handed to hook as mode={ASK_MODE}")
+                return {"answers": a["answers"]}
+            return {"keep": False}
         if time.time() > a["deadline"]:
             a["done"] = True
             ASKS.pop(cid, None)
+            log(f"ask {cid} expired for #{a['sid'][:8]}")
             ask_close(cid, "⌛ expired — answer in the app")
             return {"keep": False}
     return {"keep": True}
 
 
+def in_quiet_hours(minute=None):
+    if not QUIET:
+        return False
+    if minute is None:
+        t = time.localtime()
+        minute = t.tm_hour * 60 + t.tm_min
+    start, end = QUIET
+    return start <= minute < end if start <= end else (minute >= start or minute < end)
+
+
+def silenced():
+    return not remote_active() and (time.time() < STATE.get("mute_until", 0) or in_quiet_hours())
+
+
 def notify(sid, cwd, kind, text):
     h = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()
     with LOCK:
+        if silenced():
+            return
         delay = 3 if remote_active() else max(3, NOTIFY_GRACE)
         PENDING[sid] = {"due": time.time() + delay, "kind": kind, "hash": h, "text": text, "cwd": cwd}
 
@@ -620,12 +710,21 @@ def release_holds_locked():
         e["event"].set()
 
 
-def handle_event(data):
+def debug_hooklog(data):
+    if not DEBUG_HOOKLOG:
+        return
     try:
-        with open(SPIKE / "hooklog.jsonl", "a", encoding="utf-8") as f:
+        SPIKE.mkdir(exist_ok=True)
+        p = SPIKE / "hooklog.jsonl"
+        rotate(p, LOG_MAX_BYTES * 5)
+        with open(p, "a", encoding="utf-8") as f:
             f.write(json.dumps({"ts": time.time(), "raw": data}, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+def handle_event(data):
+    debug_hooklog(data)
     ev = data.get("hook_event_name")
     sid = data.get("session_id")
     cwd = data.get("cwd") or ""
@@ -649,7 +748,10 @@ def handle_event(data):
             inject = pop_pending_locked(sid)
         return {"inject": inject}
     if ev == "Notification":
-        notify(sid, cwd, "notify", "⏳ " + (data.get("message") or "waiting for input"))
+        msg = data.get("message") or "waiting for input"
+        if "AskUserQuestion" in msg or "ExitPlanMode" in msg:
+            return {}
+        notify(sid, cwd, "notify", "⏳ " + msg)
         return {}
     if ev == "PreToolUse":
         tool = data.get("tool_name")
@@ -913,6 +1015,12 @@ def handle_update(u):
     if cmd == "/fast":
         reply_chat(set_fast(arg))
         return
+    if cmd == "/mute":
+        reply_chat(set_mute(arg))
+        return
+    if cmd == "/unmute":
+        reply_chat(unmute())
+        return
     if cmd == "/sessions":
         reply_chat(sessions_list())
         return
@@ -1061,7 +1169,6 @@ class Server(ThreadingHTTPServer):
 
 def main():
     LOGS.mkdir(exist_ok=True)
-    SPIKE.mkdir(exist_ok=True)
     try:
         server = Server(("127.0.0.1", PORT), Handler)
     except OSError:
@@ -1069,7 +1176,7 @@ def main():
         return
     threading.Thread(target=poll_loop, daemon=True).start()
     threading.Thread(target=send_loop, daemon=True).start()
-    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'} hold={HOLD_SECONDS}s grace={NOTIFY_GRACE}s ask={ASK_WAIT}s/{ASK_MODE}")
+    log(f"daemon up on 127.0.0.1:{PORT} dry_run={not BOT_TOKEN} owner={OWNER_ID or 'UNSET'} hold={HOLD_SECONDS}s grace={NOTIFY_GRACE}s ask={ASK_WAIT}s/{ASK_MODE} quiet={ENV.get('QUIET_HOURS') or 'off'} hooklog={'on' if DEBUG_HOOKLOG else 'off'}")
     server.serve_forever()
 
 
