@@ -31,7 +31,7 @@ New-Item -ItemType Directory -Force (Split-Path -Parent $Dest) | Out-Null
 if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
 Copy-Item -Recurse (Join-Path $App "plugin") $Dest
 $tpl = Join-Path $Dest "hooks\hooks.json.template"
-$hooks = (Get-Content $tpl -Raw) -replace "__PYTHON__", ($PythonExe -replace '\\', '\\\\')
+$hooks = (Get-Content $tpl -Raw) -replace "__PYTHON__", ($PythonExe -replace '\\', '\\')
 [System.IO.File]::WriteAllText((Join-Path $Dest "hooks\hooks.json"), $hooks)
 Remove-Item $tpl
 [System.IO.File]::WriteAllText((Join-Path $Dest "hooks\home.txt"), $App)
