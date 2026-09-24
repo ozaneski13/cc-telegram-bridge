@@ -95,6 +95,8 @@ Kurulum bu kadar. Bundan sonrası otomatik: daemon logon'da kendi başlar, durur
 | `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Modeli değiştirir (1M context için sonuna `[1m]`) |
 | `/effort low\|medium\|high\|xhigh [#chat\|N\|global]` | Düşünme eforunu değiştirir |
 | `/fast on\|off` | Fast mode açar/kapatır |
+| `/mute`, `/mute 30m`, `/mute 2h` | Bildirimleri duraklatır (varsayılan 1 saat); cevap yazmak ve canlı mod çalışmaya devam eder |
+| `/unmute` | Bildirimleri tekrar açar |
 | `/help` | Komut listesi |
 
 **Kapsam kuralı.** `/model` ve `/effort` tek bir chat'i değiştirir. Chat'i satır içinde belirt — `/model fable #a1b2c3d4`, `/model fable 6` (`/sessions`'daki numara) veya başlığıyla — ya da hiç yazma, aktif hedef chat kullanılır. Sonuna `global` eklersen — `/model fable global` — bunun yerine **yeni** chat'lerin varsayılanı değişir. `/fast` yalnızca globaldir.
@@ -144,6 +146,8 @@ Kapalı olması bir şey bozmaz — kuyruktakiler yine hedef session uyanınca i
 | `HOLD_SECONDS` | Canlı modda session'ın sonraki cevabını bekleme süresi | `600` |
 | `ASK_WAIT_SECONDS` | Çoktan seçmeli sorunun buton cevabını bekleme süresi (yalnız canlı modda) | `300` |
 | `ASK_ANSWER_MODE` | `input` cevabı tool'a doldurur; `deny` cevabı geri-bildirim metni olarak verir | `input` |
+| `QUIET_HOURS` | Bildirim gelmeyen günlük pencere, örn. `23:00-08:00` (gece yarısını aşabilir); canlı modda yine gelir | kapalı |
+| `DEBUG_HOOKLOG` | `1` her ham hook payload'ını `spike/hooklog.jsonl`'e yazar (5 MB sınırlı), hata ayıklama içindir — sohbet metni içerir, normalde kapalı bırak | kapalı |
 | `IGNORE_CWD_SUBSTRINGS` | Bildirim atmayacak klasör adı parçaları (virgülle) | `cc-telegram-bridge` |
 
 `.env` değişince daemon'ı yeniden başlat.
@@ -191,6 +195,7 @@ Bu komutların gösterdiği ve anlamı:
 - **Sabit bir dosya kümesine yazıyor:** kendi klasörü (durum, kuyruk, log), hedeflenen sohbetin `model`/`effort` alanı ve — yalnızca `global`/`/fast` ile — `~/.claude/settings.json` içindeki `model`, `effortLevel`, `fastMode` anahtarları (`.bridge-bak` yedeği alınarak ve dosya doğrulanarak). Geçersiz değer reddediliyor.
 - **Sadece senin numeric Telegram id'in kabul ediliyor;** gerisi sessizce düşüyor, yani botunu bulan yabancının eline hiçbir şey geçmiyor. Lokal HTTP ucu yalnızca loopback dinliyor ve ortak sır istiyor.
 - **Bot token'ın `.env`'den hiç çıkmıyor** (gitignore'da). Daemon başka bir kimlik bilgisi tutmuyor; `/usage`, Claude Code'un makinende zaten sakladığı OAuth token'ını okuyup yalnızca Anthropic'e gönderiyor.
+- **Claude'un cevapları diske yazılmıyor.** Hook payload'ları bellekte işlenip iletiliyor; `logs/daemon.log` yalnızca işletim satırları tutuyor ve 1 MB'da dönüyor. Yerelde saklanan tek sohbet metni, iletilmeyi bekleyen kendi cevapların (`inbox.jsonl`, `state.json`). Ham payload kaydı `DEBUG_HOOKLOG=1` yapılmadıkça kapalı. (Bot token'ı olmayan dry-run modunda gönderilecek mesajlar bilerek `logs/outbox.log`'a yazılır.)
 
 **Gerçekten neyi açığa çıkarıyor — kabul edip etmediğine sen karar ver:**
 

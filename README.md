@@ -100,6 +100,8 @@ That's the whole setup. From now on everything is automatic: the daemon starts a
 | `/model opus\|sonnet\|fable\|haiku [#chat\|N\|global]` | Sets the model (append `[1m]` for 1M context) |
 | `/effort low\|medium\|high\|xhigh [#chat\|N\|global]` | Sets the reasoning effort |
 | `/fast on\|off` | Toggles fast mode |
+| `/mute`, `/mute 30m`, `/mute 2h` | Pauses notifications (default 1 hour); replies and live mode keep working |
+| `/unmute` | Turns notifications back on |
 | `/help` | Command list |
 
 **Scope rules.** `/model` and `/effort` change one chat. Name it inline — `/model fable #a1b2c3d4`, `/model fable 6` (the number from `/sessions`), or by title — or omit it to use the current target chat. Add `global` — `/model fable global` — to change the default for **new** chats instead. `/fast` is global only.
@@ -149,6 +151,8 @@ If it's closed, nothing breaks — queued messages are still delivered when the 
 | `HOLD_SECONDS` | How long sessions wait for your next phone reply in live mode | `600` |
 | `ASK_WAIT_SECONDS` | How long a multiple-choice question waits for your button tap (live mode only) | `300` |
 | `ASK_ANSWER_MODE` | `input` pre-fills the tool's answers; `deny` returns the answer as feedback text instead | `input` |
+| `QUIET_HOURS` | Daily window with no notifications, e.g. `23:00-08:00` (crossing midnight is fine); live mode still gets through | off |
+| `DEBUG_HOOKLOG` | `1` writes every raw hook payload to `spike/hooklog.jsonl` (capped at 5 MB) for debugging — it contains conversation text, so leave it off normally | off |
 | `IGNORE_CWD_SUBSTRINGS` | Comma-separated folder-name parts whose sessions never notify | `cc-telegram-bridge` |
 
 Restart the daemon after changing `.env`.
@@ -196,6 +200,7 @@ What those commands show, and what it means:
 - **It writes to a fixed set of paths:** its own folder (state, queue, logs), the `model`/`effort` field of a named chat's saved state, and — only for `global`/`/fast` — the `model`, `effortLevel` and `fastMode` keys of `~/.claude/settings.json`, backed up to `.bridge-bak` and validated before replacing. Any other value is rejected.
 - **Only your numeric Telegram id is accepted;** everything else is dropped silently, so a stranger who finds your bot gets nothing. The local HTTP endpoint listens on loopback only and requires a shared secret.
 - **Your bot token never leaves `.env`,** which is gitignored. The daemon holds no other credential; `/usage` reads the OAuth token Claude Code already stored on your machine and sends it only to Anthropic.
+- **Claude's answers are not kept on disk.** Hook payloads are handled in memory and forwarded; `logs/daemon.log` holds only operational lines and rotates at 1 MB. The only conversation text stored locally is your own replies waiting to be delivered (`inbox.jsonl`, `state.json`). The raw payload log is off unless you set `DEBUG_HOOKLOG=1`. (In dry-run mode, without a bot token, would-be messages go to `logs/outbox.log` by design.)
 
 **What it genuinely exposes — decide if you accept it:**
 

@@ -1,6 +1,6 @@
 # Resume here
 
-State of the project as of 2026-08-08, written so it can be picked up on a fresh machine with nothing but this repository.
+State of the project as of 2026-09-24, written so it can be picked up on a fresh machine with nothing but this repository.
 
 ## Getting it running again
 
@@ -23,13 +23,18 @@ Verify: ask something in any chat, don't touch the app, and the answer should re
 - Multiple-choice questions as inline buttons, with multi-select and free-text; only while you are on the phone, never blocking at the PC. The Telegram half is verified live (tap → answer captured, message edited).
 - `/usage`, `/status`, `/model`, `/effort`, `/fast`, `/sessions`, `/use`, `/help`.
 - Runs from source under the user's Python — no packed binary (see the Defender note in `platform-notes.md`).
+- `/mute`, `/unmute` and `QUIET_HOURS`; live mode gets through both.
+- Nothing from sessions is kept on disk by default: the raw hook log is opt-in (`DEBUG_HOOKLOG=1`, capped), `daemon.log` rotates at 1 MB.
+- A question at the PC now reaches the phone as the question itself — previously its permission `Notification` overwrote it (proved against the old code, fixed 2026-09-24).
 
 ## Open items
 
-1. **Does a tapped button actually close the question in the app?** The daemon captures the answer correctly, but the last link — the hook returning `updatedInput.answers` and the question never appearing in the app — was never observed, because headless sessions have no question tool. Test: message the bot (to enter live mode), then in a scratch chat ask Claude to pose a two-option question and tap a button. If the question still opens in the app, set `ASK_ANSWER_MODE=deny` in `.env` and restart the daemon.
+1. **Does a tapped button actually close the question in the app?** The daemon captures the answer correctly; whether the app then skips its own question dialog (the hook returns `updatedInput.answers`) has not been observed. The daemon now logs every question it handles — `ask N started`, `answered from telegram`, `expired`, `cancelled` in `logs/daemon.log` — so the next time you answer one from the phone, check the chat: if the question never opened in the app, it works. If it did open, set `ASK_ANSWER_MODE=deny` in `.env` and restart the daemon.
 2. **Does a per-chat `/model` apply when that chat is reopened?** The value is written to the chat's stored state and survives (measured), but the app reading it on open was not observed. Test on a chat that is closed; if it does not apply, drop the per-chat path and keep only `global`.
-3. **`Notification` payload shape** — the daemon handles it, but a real idle/permission notification was never captured, only a synthetic one.
+3. **Typing in the same chat from the PC while it holds for a phone reply** — untested: what the app shows, and whether Esc ends the hold early.
 4. Plan approval (`ExitPlanMode`) is notify-only; approving remotely is not possible (a hook cannot leave plan mode).
+
+Closed since the last update: the real `Notification` payload shape (131 events captured; see `platform-notes.md`).
 
 ## If you extend it
 

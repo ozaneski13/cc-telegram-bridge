@@ -18,6 +18,8 @@ Measured on Claude Code 2.1.x with the Windows desktop app. Behaviour may change
 
 **Hooks can inject context on `UserPromptSubmit` and `SessionStart`** via `hookSpecificOutput.additionalContext` — used here to deliver messages that arrived while a chat was asleep.
 
+**`Notification` is mostly permission prompts, and a question fires it too.** Across 131 real events the only `notification_type` seen was `permission_prompt` ("Claude needs your permission to use Bash", and the same for `AskUserQuestion`); `idle_prompt` never appeared. Payload keys: `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `message`, `notification_type`, `prompt_id`, `scratchpad_dir`. So one question arrives twice — as `PreToolUse` for `AskUserQuestion`, then as a permission `Notification`. A notifier that keeps one pending message per session will have the second overwrite the first and send "needs your permission" instead of the question; the bridge drops the `Notification` half for `AskUserQuestion` and `ExitPlanMode`.
+
 **Hook stdin is UTF-8, and Windows Python will not assume that.** `json.load(sys.stdin)` mangles non-ASCII text (cp125x decoding); read bytes instead: `json.loads(sys.stdin.buffer.read().decode("utf-8"))`. The failure is silent — the pipeline works and only the characters are wrong.
 
 ## Sessions and identity
